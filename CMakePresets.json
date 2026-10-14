@@ -1,0 +1,83 @@
+{
+    "version": 4,
+    "cmakeMinimumRequired": { "major": 3, "minor": 26 },
+    "configurePresets": [
+        {
+            "name": "windows-d3d12",
+            "displayName": "Windows x64, D3D12 (Visual Studio 2022)",
+            "description": "Multi-config. Works from a plain shell -- no developer command prompt needed.",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build/windows-d3d12",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_VERSION": "10.0.26100.0",
+                "R4D_ENABLE_D3D12": "ON",
+                "R4D_ENABLE_VULKAN": "OFF",
+                "R4D_ENABLE_AGILITY_SDK": "ON",
+                "R4D_BUILD_TESTS": "ON",
+                "R4D_WARNINGS_AS_ERRORS": "ON",
+                "R4D_MIN_LOG_LEVEL": "0"
+            }
+        },
+        {
+            "name": "windows-d3d12-ninja",
+            "displayName": "Windows x64, D3D12 (Ninja Multi-Config)",
+            "description": "Faster iteration, but MUST be run from a Visual Studio developer command prompt so that cl.exe and the linker environment are set up.",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/build/windows-d3d12-ninja",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_VERSION": "10.0.26100.0",
+                "CMAKE_MAKE_PROGRAM": "C:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
+                "R4D_ENABLE_D3D12": "ON",
+                "R4D_ENABLE_AGILITY_SDK": "ON",
+                "R4D_BUILD_TESTS": "ON",
+                "R4D_WARNINGS_AS_ERRORS": "ON",
+                "R4D_MIN_LOG_LEVEL": "0"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-d3d12-debug",
+            "displayName": "Debug",
+            "configurePreset": "windows-d3d12",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-d3d12-relwithdebinfo",
+            "displayName": "RelWithDebInfo (use this for any measurement)",
+            "configurePreset": "windows-d3d12",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "windows-d3d12-release",
+            "displayName": "Release",
+            "configurePreset": "windows-d3d12",
+            "configuration": "Release"
+        },
+        {
+            "name": "windows-d3d12-ninja-debug",
+            "displayName": "Debug (Ninja)",
+            "configurePreset": "windows-d3d12-ninja",
+            "configuration": "Debug"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "windows-d3d12-debug",
+            "displayName": "Debug tests",
+            "configurePreset": "windows-d3d12",
+            "configuration": "Debug",
+            "output": { "outputOnFailure": true },
+            "execution": { "jobs": 16 }
+        },
+        {
+            "name": "windows-d3d12-relwithdebinfo",
+            "displayName": "RelWithDebInfo tests",
+            "configurePreset": "windows-d3d12",
+            "configuration": "RelWithDebInfo",
+            "output": { "outputOnFailure": true },
+            "execution": { "jobs": 16 }
+        }
+    ]
+}

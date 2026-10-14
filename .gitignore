@@ -1,0 +1,51 @@
+# Build outputs
+build/
+build-*/
+out/
+install/
+
+# CMake
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake.stamp
+
+# Visual Studio / MSVC
+.vs/
+*.vcxproj
+*.vcxproj.*
+*.sln
+*.suo
+*.user
+*.obj
+*.ilk
+*.pdb
+*.idb
+*.exp
+*.lib
+*.exe
+*.dll
+
+# Editors
+.vscode/*
+!.vscode/settings.json.example
+.idea/
+*.swp
+
+# Tooling / profiling captures
+*.rdc
+*.wpix
+*.nsight-gfxr
+*.ncu-rep
+*.nsys-rep
+*.sqlite
+
+# Test artefacts (reference images under tests/data are tracked)
+tests/output/
+*.actual.png
+*.diff.png
+
+# Local scratch
+scratch/
+TODO.local

@@ -1,0 +1,48 @@
+# Radiance4D line-ending and diff policy.
+#
+# `core.autocrlf=true` is set globally on the primary development machine, which
+# would otherwise rewrite line endings on checkout. That is harmless for C++ but
+# NOT harmless for binary reference images used by image-regression tests, nor
+# for compiled shader blobs. Normalise text explicitly and mark binaries.
+
+* text=auto eol=lf
+
+*.c      text
+*.cpp    text
+*.h      text
+*.hpp    text
+*.hlsl   text
+*.hlsli  text
+*.slang  text
+*.txt    text
+*.cmake  text
+*.json   text
+*.md     text
+*.yaml   text
+*.yml    text
+*.manifest text
+.gitattributes text
+.gitignore     text
+
+# Windows-only scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binaries: never touch.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.exr  binary
+*.hdr  binary
+*.dds  binary
+*.ply  binary
+*.bin  binary
+*.dxil binary
+*.spv  binary
+*.cso  binary
+*.dll  binary
+*.lib  binary
+*.pdb  binary
+*.glb  binary
+*.gltf text

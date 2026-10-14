@@ -11,6 +11,7 @@
 #include <radiance4d/graphics/FrameCapture.hpp>
 #include <radiance4d/graphics/GpuCapabilities.hpp>
 #include <radiance4d/graphics/GpuStats.hpp>
+#include <radiance4d/scene/Model.hpp>
 
 #include <memory>
 #include <string>
@@ -55,6 +56,9 @@ namespace r4d
 
         Renderer(const Renderer&) = delete;
         Renderer& operator=(const Renderer&) = delete;
+
+        // Replaces the geometry; waits for the GPU before releasing the old buffers.
+        virtual Status uploadModel(const Model& model) = 0;
 
         virtual void setCamera(const CameraParams& camera) = 0;
 

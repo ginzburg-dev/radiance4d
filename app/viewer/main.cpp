@@ -9,6 +9,7 @@
 #include <radiance4d/core/Window.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
 #include <radiance4d/scene/Camera.hpp>
+#include <radiance4d/scene/Model.hpp>
 
 #include <array>
 #include <charconv>
@@ -35,6 +36,7 @@ namespace
         std::uint64_t frameLimit = 0;
         std::uint32_t resizeCycles = 0;
         bool headless = false;
+        std::string scenePath;
         std::string outputPath;
         double fixedTimeStep = 0.0;
         bool help = false;
@@ -53,6 +55,7 @@ namespace
             "  --log-level <0..5>           0=trace 2=info 4=error\n"
             "  --frames <n>                 exit after n frames (for automated runs)\n"
             "  --resize-cycles <n>          cycle through window sizes n times\n"
+            "  --scene <file.gltf>          load a glTF or glb scene\n"
             "  --headless                   no window; render to an offscreen target\n"
             "  --out <file.png>             write the last rendered frame as a PNG\n"
             "  --fixed-step <seconds>       advance animation by a fixed amount per\n"
@@ -124,6 +127,11 @@ namespace
                 if (!next(value) || !parseUint(value, n)) return false;
                 options.resizeCycles = static_cast<std::uint32_t>(n);
             }
+            else if (arg == "--scene")
+            {
+                if (!next(value)) return false;
+                options.scenePath = std::string{value};
+            }
             else if (arg == "--out")
             {
                 if (!next(value)) return false;
@@ -154,6 +162,38 @@ namespace
                 return false;
             }
         }
+        return true;
+    }
+
+    // Loads the scene, uploads it and frames the camera on it.
+    bool setupScene(r4d::Renderer& gpu, r4d::Camera& camera, const Options& options)
+    {
+        r4d::Model model;
+        if (options.scenePath.empty())
+        {
+            model = r4d::makeDemoScene();
+            R4D_INFO("Scene: built-in material grid");
+        }
+        else
+        {
+            auto loaded = r4d::loadGltf(options.scenePath);
+            if (!loaded)
+            {
+                R4D_CRIT("Cannot load scene: {}", loaded.error().ToString());
+                return false;
+            }
+            model = std::move(loaded.value());
+            R4D_INFO("Scene: {}", options.scenePath);
+        }
+
+        if (auto status = gpu.uploadModel(model); !status)
+        {
+            R4D_CRIT("Cannot upload scene: {}", status.error().ToString());
+            return false;
+        }
+
+        const float radius = model.bounds.valid() ? model.bounds.radius() : 1.0f;
+        camera.focusOn(model.bounds.centre(), radius);
         return true;
     }
 
@@ -264,9 +304,12 @@ namespace
         auto& gpu = *renderer.value();
 
         Camera camera;
-        camera.focusOn(Vec3{0.0f, 0.0f, 0.0f}, 1.0f);
         camera.setAspect(static_cast<float>(options.width) /
                          static_cast<float>(options.height));
+        if (!setupScene(gpu, camera, options))
+        {
+            return 1;
+        }
 
         int exitCode = 0;
         std::uint64_t frame = 0;
@@ -322,7 +365,10 @@ namespace
         auto& gpu = *renderer.value();
 
         Camera camera;
-        camera.focusOn(Vec3{0.0f, 0.0f, 0.0f}, 1.0f);
+        if (!setupScene(gpu, camera, options))
+        {
+            return 1;
+        }
 
         R4D_INFO("Controls: Esc quit, F1 vsync, F2 camera mode, "
                  "LMB orbit, RMB pan, wheel zoom, WASDQE in free-fly");

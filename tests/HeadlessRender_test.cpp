@@ -8,6 +8,7 @@
 #include <radiance4d/core/Log.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
 #include <radiance4d/scene/Camera.hpp>
+#include <radiance4d/scene/Model.hpp>
 
 #include "ImageCompare.hpp"
 
@@ -30,7 +31,7 @@ namespace
     std::filesystem::path referencePath()
     {
         return std::filesystem::path{R4D_TEST_DATA_DIR} / "references" / "warp" /
-               "triangle_640x360.png";
+               "materials_640x360.png";
     }
 
     r4d::RendererDesc headlessWarpDesc(std::uint32_t width = kWidth,
@@ -57,8 +58,14 @@ namespace
         }
         auto& gpu = *renderer.value();
 
+        const r4d::Model model = r4d::makeDemoScene(3, 2, 16);
+        if (auto status = gpu.uploadModel(model); !status)
+        {
+            return status.error();
+        }
+
         r4d::Camera camera;
-        camera.focusOn(r4d::Vec3{0.0f, 0.0f, 0.0f}, 1.0f);
+        camera.focusOn(model.bounds.centre(), model.bounds.radius());
         camera.setAspect(static_cast<float>(width) / static_cast<float>(height));
         gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(),
                                         camera.position()});
@@ -126,16 +133,26 @@ TEST_F(HeadlessRender, CornersShowTheClearColourAndTheCentreShowsGeometry)
     }
 
     // Without this an all-background image would pass the corner checks.
-    const std::uint32_t cx = kWidth / 2;
-    const std::uint32_t cy = kHeight / 2;
-    const bool centreDiffers = channelAt(image, cx, cy, 0) != kClearR ||
-                               channelAt(image, cx, cy, 1) != kClearG ||
-                               channelAt(image, cx, cy, 2) != kClearB;
-    EXPECT_TRUE(centreDiffers)
-        << "centre pixel is the clear colour, so nothing was drawn";
+    std::uint64_t covered = 0;
+    for (std::uint32_t y = 0; y < kHeight; ++y)
+    {
+        for (std::uint32_t x = 0; x < kWidth; ++x)
+        {
+            if (channelAt(image, x, y, 0) != kClearR ||
+                channelAt(image, x, y, 1) != kClearG ||
+                channelAt(image, x, y, 2) != kClearB)
+            {
+                ++covered;
+            }
+        }
+    }
+    const double coverage =
+        static_cast<double>(covered) / static_cast<double>(kWidth * kHeight);
+    EXPECT_GT(coverage, 0.05) << "almost nothing was drawn";
+    EXPECT_LT(coverage, 0.95) << "the background is gone; is the scene framed?";
 
     // Alpha is 1.0 everywhere.
-    EXPECT_EQ(channelAt(image, cx, cy, 3), 255);
+    EXPECT_EQ(channelAt(image, kWidth / 2, kHeight / 2, 3), 255);
 }
 
 TEST_F(HeadlessRender, IsReproducibleWithAFixedTimeStep)
@@ -150,16 +167,41 @@ TEST_F(HeadlessRender, IsReproducibleWithAFixedTimeStep)
         << "two runs with the same fixed time step produced different images";
 }
 
-TEST_F(HeadlessRender, AnimationAdvancesBetweenFrameCounts)
+TEST_F(HeadlessRender, MovingTheCameraChangesTheImage)
 {
-    // A frozen scene would make the reproducibility check pass trivially.
-    auto early = renderAndCapture(2);
-    ASSERT_TRUE(early.ok()) << early.error().ToString();
-    auto late = renderAndCapture(40);
-    ASSERT_TRUE(late.ok()) << late.error().ToString();
+    // The scene is static, so this is what keeps the reproducibility check above
+    // from passing trivially on a blank frame.
+    auto renderer =
+        r4d::createRenderer(r4d::BackendType::D3D12, headlessWarpDesc());
+    ASSERT_TRUE(renderer.ok()) << renderer.error().ToString();
+    auto& gpu = *renderer.value();
 
-    EXPECT_NE(early.value().rgba, late.value().rgba)
-        << "the scene is identical at frame 2 and frame 40; is it animating?";
+    const r4d::Model model = r4d::makeDemoScene(3, 2, 16);
+    ASSERT_TRUE(gpu.uploadModel(model).ok());
+
+    r4d::Camera camera;
+    camera.setAspect(static_cast<float>(kWidth) / static_cast<float>(kHeight));
+    camera.focusOn(model.bounds.centre(), model.bounds.radius());
+
+    gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
+    ASSERT_TRUE(gpu.renderFrame().ok());
+    auto first = gpu.captureFrame();
+    ASSERT_TRUE(first.ok()) << first.error().ToString();
+
+    r4d::InputState input;
+    input.setMouseDown(r4d::MouseButton::Left, true);
+    input.setMousePosition(r4d::Vec2{0.0f, 0.0f});
+    input.setMousePosition(r4d::Vec2{140.0f, 40.0f});
+    camera.update(input, 1.0 / 60.0);
+
+    gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
+    ASSERT_TRUE(gpu.renderFrame().ok());
+    auto second = gpu.captureFrame();
+    ASSERT_TRUE(second.ok()) << second.error().ToString();
+
+    EXPECT_NE(first.value().rgba, second.value().rgba)
+        << "orbiting the camera did not change the image";
+    EXPECT_EQ(gpu.validationErrorCount(), 0u);
 }
 
 TEST_F(HeadlessRender, HonoursANonSquareOddSizedTarget)

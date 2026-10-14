@@ -1,17 +1,38 @@
-// Common.hlsli -- shared shader declarations.
+// Common.hlsli
 //
-// Matrix convention: shaders are compiled with dxc -Zpc (column-major packing),
-// which matches GLM's in-memory layout, so a glm::mat4 uploads to a float4x4
-// with no transpose. Transform vectors as mul(M, v), never mul(v, M).
+// Matrices are column-major on both sides (dxc -Zpc plus the GLM layout), so
+// transform vectors as mul(M, v).
 
 #ifndef R4D_COMMON_HLSLI
 #define R4D_COMMON_HLSLI
 
-struct FrameConstants
+#define R4D_LIGHT_COUNT 3
+
+struct Light
 {
-    float4x4 transform;      // full model-view-projection
-    float    timeSeconds;
-    float3   padding;
+    float3 direction;   // towards the light
+    float  intensity;
+    float3 colour;
+    float  padding;
 };
 
-#endif // R4D_COMMON_HLSLI
+struct FrameConstants
+{
+    float4x4 viewProjection;
+    float3   cameraPosition;
+    float    timeSeconds;
+    float3   ambient;
+    float    exposure;
+    Light    lights[R4D_LIGHT_COUNT];
+};
+
+struct MaterialConstants
+{
+    float4 baseColour;
+    float3 emissive;
+    float  metallic;
+    float  roughness;
+    float3 padding;
+};
+
+#endif

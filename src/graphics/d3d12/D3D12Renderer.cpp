@@ -9,37 +9,37 @@ namespace r4d::d3d12
 {
     namespace
     {
-        struct Vertex
+        constexpr UINT kLightCount = 3;
+
+        struct Light
         {
-            float position[3];
-            float colour[3];
+            Vec3 direction;
+            float intensity;
+            Vec3 colour;
+            float padding;
         };
-
-        // Triangle then quad, in one buffer. The quad sits behind so the depth
-        // test has something to do.
-        constexpr Vertex kVertices[] = {
-            // Triangle
-            {{ 0.0f,  0.6f, 0.0f}, {1.0f, 0.15f, 0.15f}},
-            {{ 0.6f, -0.5f, 0.0f}, {0.15f, 1.0f, 0.25f}},
-            {{-0.6f, -0.5f, 0.0f}, {0.2f, 0.35f, 1.0f}},
-            // Quad
-            {{-0.85f,  0.85f, 0.3f}, {0.16f, 0.18f, 0.28f}},
-            {{ 0.85f,  0.85f, 0.3f}, {0.10f, 0.26f, 0.38f}},
-            {{ 0.85f, -0.85f, 0.3f}, {0.22f, 0.12f, 0.30f}},
-            {{-0.85f, -0.85f, 0.3f}, {0.08f, 0.10f, 0.16f}},
-        };
-
-        constexpr std::uint16_t kIndices[] = {0, 1, 2, 0, 2, 3};
-
-        constexpr UINT kTriangleVertexCount = 3;
-        constexpr UINT kQuadVertexOffset = 3;
 
         struct FrameConstants
         {
-            Mat4 transform;
+            Mat4 viewProjection;
+            Vec3 cameraPosition;
             float timeSeconds;
+            Vec3 ambient;
+            float exposure;
+            Light lights[kLightCount];
+        };
+
+        struct MaterialConstants
+        {
+            Vec4 baseColour;
+            Vec3 emissive;
+            float metallic;
+            float roughness;
             float padding[3];
         };
+
+        static_assert(sizeof(MaterialConstants) % sizeof(UINT32) == 0);
+        constexpr UINT kMaterialRootConstants = sizeof(MaterialConstants) / sizeof(UINT32);
 
         constexpr UINT64 kConstantBufferAlignment = 256;
 
@@ -115,8 +115,7 @@ namespace r4d::d3d12
         {
             D3D12_RASTERIZER_DESC desc{};
             desc.FillMode = D3D12_FILL_MODE_SOLID;
-            // Culling comes with real meshes in M2.
-            desc.CullMode = D3D12_CULL_MODE_NONE;
+            desc.CullMode = D3D12_CULL_MODE_BACK;
             desc.FrontCounterClockwise = FALSE;
             desc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
             desc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
@@ -274,7 +273,6 @@ namespace r4d::d3d12
         R4D_INFO("Renderer: shader directory '{}'", shaderDirectory.string());
 
         R4D_TRY(createPipeline(shaderDirectory));
-        R4D_TRY(createGeometry());
 
         // Missing timestamp support is not fatal; stats report them as invalid.
         R4D_TRY(m_profiler.initialise(m_device.Get(), m_queue.Get(), kFramesInFlight));
@@ -646,29 +644,38 @@ namespace r4d::d3d12
 
     Status D3D12Renderer::createPipeline(const std::filesystem::path& shaderDirectory)
     {
-        auto vertexShader = loadShaderBlob(shaderDirectory, "Triangle.vs.dxil");
+        auto vertexShader = loadShaderBlob(shaderDirectory, "Pbr.vs.dxil");
         if (!vertexShader)
         {
             return vertexShader.error();
         }
-        auto pixelShader = loadShaderBlob(shaderDirectory, "Triangle.ps.dxil");
+        auto pixelShader = loadShaderBlob(shaderDirectory, "Pbr.ps.dxil");
         if (!pixelShader)
         {
             return pixelShader.error();
         }
 
         // One root CBV at b0; materials in M2 will need more.
-        D3D12_ROOT_PARAMETER1 rootParameter{};
-        rootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rootParameter.Descriptor.ShaderRegister = 0;
-        rootParameter.Descriptor.RegisterSpace = 0;
-        rootParameter.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+        D3D12_ROOT_PARAMETER1 rootParameters[2]{};
+        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParameters[0].Descriptor.ShaderRegister = 0;
+        rootParameters[0].Descriptor.RegisterSpace = 0;
+        rootParameters[0].Descriptor.Flags =
+            D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+
+        // Material is small and changes per draw, so it goes in root constants
+        // rather than through a descriptor table.
+        rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParameters[1].Constants.ShaderRegister = 1;
+        rootParameters[1].Constants.RegisterSpace = 0;
+        rootParameters[1].Constants.Num32BitValues = kMaterialRootConstants;
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
         rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-        rootDesc.Desc_1_1.NumParameters = 1;
-        rootDesc.Desc_1_1.pParameters = &rootParameter;
+        rootDesc.Desc_1_1.NumParameters = static_cast<UINT>(std::size(rootParameters));
+        rootDesc.Desc_1_1.pParameters = rootParameters;
         rootDesc.Desc_1_1.NumStaticSamplers = 0;
         rootDesc.Desc_1_1.pStaticSamplers = nullptr;
         rootDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -696,7 +703,11 @@ namespace r4d::d3d12
         const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
             {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, position),
              D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, colour),
+            {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, normal),
+             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TANGENT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, offsetof(Vertex, tangent),
+             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(Vertex, uv),
              D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         };
 
@@ -725,15 +736,24 @@ namespace r4d::d3d12
 
         R4D_HR(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)),
                "ID3D12Device::CreateGraphicsPipelineState");
-        m_pipelineState->SetName(L"Radiance4D Triangle PSO");
+        m_pipelineState->SetName(L"Radiance4D PBR PSO");
 
         return Status::Ok();
     }
 
-    Status D3D12Renderer::createGeometry()
+    Status D3D12Renderer::uploadModel(const Model& model)
     {
-        constexpr UINT64 vertexBytes = sizeof(kVertices);
-        constexpr UINT64 indexBytes = sizeof(kIndices);
+        if (model.empty() || model.vertices.empty() || model.indices.empty())
+        {
+            return makeError(ErrorCode::InvalidArgument, "uploadModel called with no geometry");
+        }
+
+        waitForGpuIdle();
+        m_vertexBuffer.Reset();
+        m_indexBuffer.Reset();
+
+        const UINT64 vertexBytes = model.vertices.size() * sizeof(Vertex);
+        const UINT64 indexBytes = model.indices.size() * sizeof(std::uint32_t);
 
         const auto defaultHeap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
         const auto uploadHeap = heapProperties(D3D12_HEAP_TYPE_UPLOAD);
@@ -768,11 +788,11 @@ namespace r4d::d3d12
             void* mapped = nullptr;
             const D3D12_RANGE noRead{0, 0};
             R4D_HR(vertexUpload->Map(0, &noRead, &mapped), "Map (vertex upload)");
-            std::memcpy(mapped, kVertices, static_cast<std::size_t>(vertexBytes));
+            std::memcpy(mapped, model.vertices.data(), static_cast<std::size_t>(vertexBytes));
             vertexUpload->Unmap(0, nullptr);
 
             R4D_HR(indexUpload->Map(0, &noRead, &mapped), "Map (index upload)");
-            std::memcpy(mapped, kIndices, static_cast<std::size_t>(indexBytes));
+            std::memcpy(mapped, model.indices.data(), static_cast<std::size_t>(indexBytes));
             indexUpload->Unmap(0, nullptr);
         }
 
@@ -818,8 +838,6 @@ namespace r4d::d3d12
         const UINT64 uploadFence = m_nextFenceValue++;
         R4D_HR(m_queue->Signal(m_fence.Get(), uploadFence), "Signal (upload fence)");
         R4D_TRY(waitForFenceValue(uploadFence));
-
-        // Slot 0 has been used; record it so the allocator is not reset early.
         frame.fenceValue = uploadFence;
 
         m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
@@ -828,15 +846,13 @@ namespace r4d::d3d12
 
         m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
         m_indexBufferView.SizeInBytes = static_cast<UINT>(indexBytes);
-        m_indexBufferView.Format = DXGI_FORMAT_R16_UINT;
+        m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
-        m_triangleVertexCount = kTriangleVertexCount;
-        m_quadVertexOffset = kQuadVertexOffset;
-        m_quadIndexCount = static_cast<UINT>(std::size(kIndices));
-        m_quadIndexOffset = 0;
+        m_primitives = model.primitives;
+        m_materials = model.materials;
 
-        R4D_INFO("Geometry: uploaded {} vertices and {} indices to device-local memory",
-                 std::size(kVertices), std::size(kIndices));
+        R4D_INFO("Geometry: {} vertices, {} triangles, {} primitives",
+                 model.vertices.size(), model.triangleCount(), model.primitives.size());
         return Status::Ok();
     }
 
@@ -923,12 +939,24 @@ namespace r4d::d3d12
 
         // Safe to write: the fence wait proved the GPU is done with this slot.
         {
-            const Mat4 model =
-                glm::rotate(Mat4{1.0f}, timeSeconds * 0.8f, Vec3{0.0f, 1.0f, 0.0f});
-
             FrameConstants constants{};
-            constants.transform = m_camera.projection * m_camera.view * model;
+            constants.viewProjection = m_camera.projection * m_camera.view;
+            constants.cameraPosition = m_camera.position;
             constants.timeSeconds = timeSeconds;
+            constants.ambient = Vec3{0.055f, 0.065f, 0.09f};
+            constants.exposure = 1.0f;
+
+            constants.lights[0].direction = glm::normalize(Vec3{-0.4f, 0.8f, -0.45f});
+            constants.lights[0].colour = Vec3{1.0f, 0.96f, 0.9f};
+            constants.lights[0].intensity = 3.6f;
+
+            constants.lights[1].direction = glm::normalize(Vec3{0.75f, 0.25f, 0.3f});
+            constants.lights[1].colour = Vec3{0.35f, 0.52f, 0.95f};
+            constants.lights[1].intensity = 1.5f;
+
+            constants.lights[2].direction = glm::normalize(Vec3{0.1f, -0.6f, 0.75f});
+            constants.lights[2].colour = Vec3{0.95f, 0.45f, 0.3f};
+            constants.lights[2].intensity = 0.9f;
             std::memcpy(frame.constantBufferCpu, &constants, sizeof(constants));
         }
 
@@ -979,19 +1007,32 @@ namespace r4d::d3d12
         m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
+        m_commandList->IASetIndexBuffer(&m_indexBufferView);
+
         std::uint32_t drawCalls = 0;
         std::uint32_t triangles = 0;
 
-        // No depth buffer yet, so draw order decides: quad behind, triangle on top.
-        m_commandList->IASetIndexBuffer(&m_indexBufferView);
-        m_commandList->DrawIndexedInstanced(m_quadIndexCount, 1, m_quadIndexOffset,
-                                            static_cast<INT>(m_quadVertexOffset), 0);
-        ++drawCalls;
-        triangles += m_quadIndexCount / 3;
+        for (const Primitive& primitive : m_primitives)
+        {
+            const Material& material =
+                primitive.materialIndex < m_materials.size()
+                    ? m_materials[primitive.materialIndex]
+                    : m_materials.front();
 
-        m_commandList->DrawInstanced(m_triangleVertexCount, 1, 0, 0);
-        ++drawCalls;
-        triangles += m_triangleVertexCount / 3;
+            MaterialConstants constants{};
+            constants.baseColour = material.baseColour;
+            constants.emissive = material.emissive;
+            constants.metallic = material.metallic;
+            constants.roughness = material.roughness;
+            m_commandList->SetGraphicsRoot32BitConstants(1, kMaterialRootConstants,
+                                                         &constants, 0);
+
+            m_commandList->DrawIndexedInstanced(primitive.indexCount, 1,
+                                                primitive.firstIndex,
+                                                primitive.vertexOffset, 0);
+            ++drawCalls;
+            triangles += primitive.indexCount / 3;
+        }
 
         if (!m_headless)
         {

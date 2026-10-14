@@ -28,7 +28,7 @@ target_include_directories(r4d_graphics
         "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-target_link_libraries(r4d_graphics PUBLIC r4d_core)
+target_link_libraries(r4d_graphics PUBLIC r4d_core r4d_scene)
 
 if(R4D_ENABLE_D3D12)
     target_compile_definitions(r4d_graphics PRIVATE R4D_ENABLE_D3D12=1)

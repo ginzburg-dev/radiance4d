@@ -6,6 +6,7 @@
 #include <radiance4d/core/Log.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
 #include <radiance4d/scene/Camera.hpp>
+#include <radiance4d/scene/Model.hpp>
 
 #include <gtest/gtest.h>
 
@@ -66,6 +67,9 @@ TEST_F(WarpDevice, RendersFramesWithoutValidationErrors)
     ASSERT_TRUE(renderer.ok()) << renderer.error().ToString();
     auto& gpu = *renderer.value();
 
+    const r4d::Model model = r4d::makeDemoScene(2, 2, 12);
+    ASSERT_TRUE(gpu.uploadModel(model).ok());
+
     // More than the frames in flight, so allocator reuse is exercised.
     constexpr int kFrames = 12;
     for (int i = 0; i < kFrames; ++i)
@@ -75,7 +79,7 @@ TEST_F(WarpDevice, RendersFramesWithoutValidationErrors)
 
     EXPECT_EQ(gpu.validationErrorCount(), 0u);
     EXPECT_EQ(gpu.stats().frameIndex, static_cast<std::uint64_t>(kFrames));
-    EXPECT_EQ(gpu.stats().drawCalls, 2u);   // indexed quad plus the triangle
+    EXPECT_EQ(gpu.stats().drawCalls, static_cast<std::uint32_t>(model.primitives.size()));
 }
 
 TEST_F(WarpDevice, ResizesWithoutValidationErrors)

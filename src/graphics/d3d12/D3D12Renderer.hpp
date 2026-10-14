@@ -72,7 +72,7 @@ namespace r4d::d3d12
         Status createSwapChain(void* windowHandle, UVec2 size);
         Status createFrameResources();
         Status createPipeline(const std::filesystem::path& shaderDirectory);
-        Status createGeometry();
+        Status uploadModel(const Model& model) override;
         Status createRtvHeap();
         Status acquireBackBuffers();
         void releaseBackBuffers();
@@ -115,10 +115,8 @@ namespace r4d::d3d12
         ComPtr<ID3D12Resource> m_indexBuffer;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView{};
         D3D12_INDEX_BUFFER_VIEW m_indexBufferView{};
-        UINT m_triangleVertexCount = 0;
-        UINT m_quadIndexCount = 0;
-        UINT m_quadIndexOffset = 0;
-        UINT m_quadVertexOffset = 0;
+        std::vector<Primitive> m_primitives;
+        std::vector<Material> m_materials;
 
         ComPtr<ID3D12Resource> m_offscreenTarget;
         ComPtr<ID3D12Resource> m_captureReadback;

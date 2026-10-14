@@ -1,8 +1,13 @@
 add_library(r4d_scene STATIC
     Camera.cpp
+    DemoScene.cpp
+    GltfLoader.cpp
 )
 
-target_include_directories(r4d_scene PUBLIC "${CMAKE_SOURCE_DIR}/include")
+target_include_directories(r4d_scene
+    PUBLIC "${CMAKE_SOURCE_DIR}/include"
+    PRIVATE "${R4D_CGLTF_INCLUDE_DIR}"
+)
 target_link_libraries(r4d_scene PUBLIC r4d_core)
 
 r4d_set_target_warnings(r4d_scene)

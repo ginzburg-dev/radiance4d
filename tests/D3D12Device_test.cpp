@@ -5,6 +5,7 @@
 
 #include <radiance4d/core/Log.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
+#include <radiance4d/scene/Camera.hpp>
 
 #include <gtest/gtest.h>
 

@@ -92,11 +92,21 @@ namespace
     {
         switch (vk)
         {
-            case VK_ESCAPE: outKey = r4d::Key::Escape; return true;
-            case VK_F1:     outKey = r4d::Key::F1;     return true;
-            case VK_F2:     outKey = r4d::Key::F2;     return true;
-            case VK_F3:     outKey = r4d::Key::F3;     return true;
-            default:        return false;
+            case VK_ESCAPE:  outKey = r4d::Key::Escape;  return true;
+            case VK_F1:      outKey = r4d::Key::F1;      return true;
+            case VK_F2:      outKey = r4d::Key::F2;      return true;
+            case VK_F3:      outKey = r4d::Key::F3;      return true;
+            case VK_F4:      outKey = r4d::Key::F4;      return true;
+            case 'W':        outKey = r4d::Key::W;       return true;
+            case 'A':        outKey = r4d::Key::A;       return true;
+            case 'S':        outKey = r4d::Key::S;       return true;
+            case 'D':        outKey = r4d::Key::D;       return true;
+            case 'Q':        outKey = r4d::Key::Q;       return true;
+            case 'E':        outKey = r4d::Key::E;       return true;
+            case VK_SPACE:   outKey = r4d::Key::Space;   return true;
+            case VK_SHIFT:   outKey = r4d::Key::Shift;   return true;
+            case VK_CONTROL: outKey = r4d::Key::Control; return true;
+            default:         return false;
         }
     }
 } // namespace
@@ -272,6 +282,54 @@ namespace r4d
                 }
                 break;
             }
+
+            case WM_MOUSEMOVE:
+            {
+                const int x = static_cast<short>(LOWORD(lparam));
+                const int y = static_cast<short>(HIWORD(lparam));
+                m_input.setMousePosition(Vec2{static_cast<float>(x), static_cast<float>(y)});
+                return 0;
+            }
+
+            case WM_LBUTTONDOWN:
+            case WM_RBUTTONDOWN:
+            case WM_MBUTTONDOWN:
+            {
+                // Keep receiving movement while a drag leaves the client area.
+                ::SetCapture(hwnd);
+                const MouseButton button = (msg == WM_LBUTTONDOWN)   ? MouseButton::Left
+                                           : (msg == WM_RBUTTONDOWN) ? MouseButton::Right
+                                                                     : MouseButton::Middle;
+                m_input.setMouseDown(button, true);
+                return 0;
+            }
+
+            case WM_LBUTTONUP:
+            case WM_RBUTTONUP:
+            case WM_MBUTTONUP:
+            {
+                const MouseButton button = (msg == WM_LBUTTONUP)   ? MouseButton::Left
+                                           : (msg == WM_RBUTTONUP) ? MouseButton::Right
+                                                                   : MouseButton::Middle;
+                m_input.setMouseDown(button, false);
+                if (!m_input.mouseDown(MouseButton::Left) &&
+                    !m_input.mouseDown(MouseButton::Right) &&
+                    !m_input.mouseDown(MouseButton::Middle))
+                {
+                    ::ReleaseCapture();
+                }
+                return 0;
+            }
+
+            case WM_MOUSEWHEEL:
+                m_input.addWheelDelta(static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) /
+                                      static_cast<float>(WHEEL_DELTA));
+                return 0;
+
+            case WM_KILLFOCUS:
+                // Otherwise keys held when focus was lost stay down forever.
+                m_input.releaseAll();
+                return 0;
 
             // Stop the beep on Alt and F10.
             case WM_SYSCHAR:

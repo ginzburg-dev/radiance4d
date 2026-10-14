@@ -71,6 +71,7 @@ configure_file(
 )
 
 add_subdirectory(src/core)
+add_subdirectory(src/scene)
 add_subdirectory(src/graphics)
 add_subdirectory(shaders)
 add_subdirectory(app/viewer)

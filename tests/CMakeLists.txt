@@ -24,7 +24,7 @@ set(R4D_DEVICE_TESTS
 function(r4d_add_test test_src needs_device)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})
-    target_link_libraries(${test_name} PRIVATE r4d_graphics gtest_main)
+    target_link_libraries(${test_name} PRIVATE r4d_graphics r4d_scene gtest_main)
     target_compile_definitions(${test_name} PRIVATE
         R4D_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
     )

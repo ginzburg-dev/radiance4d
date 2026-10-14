@@ -41,6 +41,13 @@ namespace r4d
         std::string shaderDirectory;
     };
 
+    struct CameraParams
+    {
+        Mat4 view{1.0f};
+        Mat4 projection{1.0f};
+        Vec3 position{0.0f, 0.0f, 0.0f};
+    };
+
     class Renderer
     {
     public:
@@ -48,6 +55,8 @@ namespace r4d
 
         Renderer(const Renderer&) = delete;
         Renderer& operator=(const Renderer&) = delete;
+
+        virtual void setCamera(const CameraParams& camera) = 0;
 
         virtual Status renderFrame() = 0;
 

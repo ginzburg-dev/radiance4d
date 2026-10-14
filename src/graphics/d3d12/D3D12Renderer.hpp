@@ -25,6 +25,7 @@ namespace r4d::d3d12
 
         ~D3D12Renderer() override;
 
+        void setCamera(const CameraParams& camera) override { m_camera = camera; }
         Status renderFrame() override;
         Status resize(UVec2 newSize) override;
         void waitForGpuIdle() override;
@@ -54,6 +55,7 @@ namespace r4d::d3d12
         static constexpr UINT kBackBufferCount = 3;
         static constexpr UINT kFramesInFlight = 2;
         static constexpr DXGI_FORMAT kBackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        static constexpr DXGI_FORMAT kDepthFormat = DXGI_FORMAT_D32_FLOAT;
 
         // Never indexed by back-buffer index.
         struct FrameContext
@@ -76,6 +78,7 @@ namespace r4d::d3d12
         void releaseBackBuffers();
 
         Status createOffscreenTarget(UVec2 size);
+        Status createDepthBuffer(UVec2 size);
 
         ID3D12Resource* currentRenderTarget(UINT backBufferIndex) const;
         D3D12_CPU_DESCRIPTOR_HANDLE currentRenderTargetView(UINT backBufferIndex) const;
@@ -92,6 +95,8 @@ namespace r4d::d3d12
         ComPtr<IDXGISwapChain3> m_swapChain;
 
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
+        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+        ComPtr<ID3D12Resource> m_depthBuffer;
         UINT m_rtvDescriptorSize = 0;
         std::array<ComPtr<ID3D12Resource>, kBackBufferCount> m_backBuffers{};
 
@@ -119,6 +124,7 @@ namespace r4d::d3d12
         ComPtr<ID3D12Resource> m_captureReadback;
         UINT64 m_captureReadbackBytes = 0;
 
+        CameraParams m_camera;
         AdapterInfo m_adapterInfo;
         GpuCapabilities m_capabilities;
         ValidationSink m_validation;

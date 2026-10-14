@@ -8,6 +8,7 @@
 #include <radiance4d/core/Version.hpp>
 #include <radiance4d/core/Window.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
+#include <radiance4d/scene/Camera.hpp>
 
 #include <array>
 #include <charconv>
@@ -262,10 +263,17 @@ namespace
         }
         auto& gpu = *renderer.value();
 
+        Camera camera;
+        camera.focusOn(Vec3{0.0f, 0.0f, 0.0f}, 1.0f);
+        camera.setAspect(static_cast<float>(options.width) /
+                         static_cast<float>(options.height));
+
         int exitCode = 0;
         std::uint64_t frame = 0;
         for (; frame < options.frameLimit; ++frame)
         {
+            gpu.setCamera(CameraParams{camera.view(), camera.projection(),
+                                       camera.position()});
             if (auto status = gpu.renderFrame(); !status)
             {
                 R4D_CRIT("renderFrame failed: {}", status.error().ToString());
@@ -313,7 +321,11 @@ namespace
         }
         auto& gpu = *renderer.value();
 
-        R4D_INFO("Controls: Esc quit, F1 toggle vsync");
+        Camera camera;
+        camera.focusOn(Vec3{0.0f, 0.0f, 0.0f}, 1.0f);
+
+        R4D_INFO("Controls: Esc quit, F1 vsync, F2 camera mode, "
+                 "LMB orbit, RMB pan, wheel zoom, WASDQE in free-fly");
 
         // Odd values catch assumptions about even dimensions.
         constexpr std::array<UVec2, 4> kResizeSizes = {
@@ -352,6 +364,22 @@ namespace
                 gpu.setVsync(!gpu.vsync());
                 R4D_INFO("vsync {}", gpu.vsync() ? "on" : "off");
             }
+            if (input.pressed(Key::F2))
+            {
+                camera.setMode(camera.mode() == CameraMode::Orbit ? CameraMode::FreeFly
+                                                                  : CameraMode::Orbit);
+                R4D_INFO("camera {}", ToString(camera.mode()));
+            }
+
+            const UVec2 viewport = window.value()->size();
+            if (viewport.y > 0)
+            {
+                camera.setAspect(static_cast<float>(viewport.x) /
+                                 static_cast<float>(viewport.y));
+            }
+            camera.update(input, gpu.stats().cpuFrameMs / 1000.0);
+            gpu.setCamera(CameraParams{camera.view(), camera.projection(),
+                                       camera.position()});
 
             if (auto status = gpu.renderFrame(); !status)
             {

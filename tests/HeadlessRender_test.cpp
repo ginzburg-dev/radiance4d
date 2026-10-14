@@ -7,6 +7,7 @@
 #include <radiance4d/core/ImageIO.hpp>
 #include <radiance4d/core/Log.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
+#include <radiance4d/scene/Camera.hpp>
 
 #include "ImageCompare.hpp"
 
@@ -55,6 +56,12 @@ namespace
             return renderer.error();
         }
         auto& gpu = *renderer.value();
+
+        r4d::Camera camera;
+        camera.focusOn(r4d::Vec3{0.0f, 0.0f, 0.0f}, 1.0f);
+        camera.setAspect(static_cast<float>(width) / static_cast<float>(height));
+        gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(),
+                                        camera.position()});
 
         for (int i = 0; i < frames; ++i)
         {

@@ -3,7 +3,7 @@
 
 add_executable(radiance4d_viewer main.cpp)
 
-target_link_libraries(radiance4d_viewer PRIVATE r4d_graphics)
+target_link_libraries(radiance4d_viewer PRIVATE r4d_graphics r4d_scene)
 
 # Agility exports, shader staging and the D3D12 redistributable directory.
 r4d_configure_runtime(radiance4d_viewer)

@@ -1,6 +1,9 @@
 {
     "version": 4,
-    "cmakeMinimumRequired": { "major": 3, "minor": 26 },
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 26
+    },
     "configurePresets": [
         {
             "name": "windows-d3d12",
@@ -34,6 +37,20 @@
                 "R4D_WARNINGS_AS_ERRORS": "ON",
                 "R4D_MIN_LOG_LEVEL": "0"
             }
+        },
+        {
+            "name": "ci-windows",
+            "displayName": "CI (whatever toolchain the runner has)",
+            "binaryDir": "${sourceDir}/build/ci-windows",
+            "architecture": "x64",
+            "cacheVariables": {
+                "R4D_ENABLE_D3D12": "ON",
+                "R4D_ENABLE_VULKAN": "OFF",
+                "R4D_ENABLE_AGILITY_SDK": "ON",
+                "R4D_BUILD_TESTS": "ON",
+                "R4D_WARNINGS_AS_ERRORS": "ON",
+                "R4D_MIN_LOG_LEVEL": "2"
+            }
         }
     ],
     "buildPresets": [
@@ -60,6 +77,16 @@
             "displayName": "Debug (Ninja)",
             "configurePreset": "windows-d3d12-ninja",
             "configuration": "Debug"
+        },
+        {
+            "name": "ci-windows-debug",
+            "configurePreset": "ci-windows",
+            "configuration": "Debug"
+        },
+        {
+            "name": "ci-windows-relwithdebinfo",
+            "configurePreset": "ci-windows",
+            "configuration": "RelWithDebInfo"
         }
     ],
     "testPresets": [
@@ -68,16 +95,40 @@
             "displayName": "Debug tests",
             "configurePreset": "windows-d3d12",
             "configuration": "Debug",
-            "output": { "outputOnFailure": true },
-            "execution": { "jobs": 16 }
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "jobs": 16
+            }
         },
         {
             "name": "windows-d3d12-relwithdebinfo",
             "displayName": "RelWithDebInfo tests",
             "configurePreset": "windows-d3d12",
             "configuration": "RelWithDebInfo",
-            "output": { "outputOnFailure": true },
-            "execution": { "jobs": 16 }
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "jobs": 16
+            }
+        },
+        {
+            "name": "ci-windows-debug",
+            "configurePreset": "ci-windows",
+            "configuration": "Debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "ci-windows-relwithdebinfo",
+            "configurePreset": "ci-windows",
+            "configuration": "RelWithDebInfo",
+            "output": {
+                "outputOnFailure": true
+            }
         }
     ]
 }

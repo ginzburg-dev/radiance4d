@@ -17,38 +17,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        configuration: [Debug, RelWithDebInfo]
+        configuration: [debug, relwithdebinfo]
 
     steps:
       - uses: actions/checkout@v4
 
-      # Dependencies are downloaded by CMake and pinned by SHA-256, so caching
-      # them is safe: a changed hash changes the key.
-      - name: Cache fetched dependencies
-        uses: actions/cache@v4
-        with:
-          path: build/windows-d3d12/_deps
-          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Fetch*.cmake', 'CMakeLists.txt') }}
-          restore-keys: deps-${{ runner.os }}-
-
+      # The ci-windows preset pins neither the Visual Studio version nor the
+      # Windows SDK, so it follows whatever the runner image provides.
       - name: Configure
-        run: cmake --preset windows-d3d12
+        run: cmake --preset ci-windows
 
       - name: Build
-        run: cmake --build --preset windows-d3d12-${{ matrix.configuration == 'Debug' && 'debug' || 'relwithdebinfo' }}
+        run: cmake --build --preset ci-windows-${{ matrix.configuration }}
 
-      # Hosted runners have no discrete GPU. Every test here either touches no
-      # device at all or uses the PINNED WARP redistributable that CMake stages
-      # next to the test binaries, which is the same rasteriser used locally --
-      # that is what makes the image references comparable across machines.
-      #
-      # A future GPU-only suite is excluded with -LE gpu; nothing carries that
-      # label yet, so this currently runs everything.
+      # No discrete GPU on a hosted runner: the device tests use the pinned WARP
+      # staged next to the test binaries.
       - name: Test
-        run: ctest --preset windows-d3d12-${{ matrix.configuration == 'Debug' && 'debug' || 'relwithdebinfo' }} --label-exclude gpu --output-on-failure
+        run: ctest --preset ci-windows-${{ matrix.configuration }} --label-exclude gpu --output-on-failure
 
-      # Image-regression failures write .actual.png and .diff.png beside the
-      # reference. Without these artefacts a CI image failure is unreadable.
       - name: Upload image-regression artefacts
         if: failure()
         uses: actions/upload-artifact@v4

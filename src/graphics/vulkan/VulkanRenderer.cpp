@@ -49,7 +49,8 @@ namespace r4d::vulkan
         // Set by the -fvk-*-shift flags the shaders are compiled with.
         constexpr std::uint32_t kTextureBinding = R4D_VK_T_SHIFT;
         constexpr std::uint32_t kSamplerBinding = R4D_VK_S_SHIFT;
-        constexpr std::uint32_t kTexturesPerMaterial = 3;
+        // base colour, metallic-roughness, normal, environment, irradiance
+        constexpr std::uint32_t kTexturesPerMaterial = 5;
 
         VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment)
         {
@@ -415,6 +416,20 @@ namespace r4d::vulkan
         R4D_VK(vkCreateSampler(m_context.device, &samplerInfo, nullptr, &m_sampler),
                "vkCreateSampler");
 
+        // Plain linear, clamped in v: see the note in the shader.
+        VkSamplerCreateInfo environmentInfo{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        environmentInfo.magFilter = VK_FILTER_LINEAR;
+        environmentInfo.minFilter = VK_FILTER_LINEAR;
+        environmentInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        environmentInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        environmentInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        environmentInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        environmentInfo.anisotropyEnable = VK_FALSE;
+        environmentInfo.maxLod = VK_LOD_CLAMP_NONE;
+        R4D_VK(vkCreateSampler(m_context.device, &environmentInfo, nullptr,
+                               &m_environmentSampler),
+               "vkCreateSampler (environment)");
+
         std::vector<VkDescriptorSetLayoutBinding> bindings;
         // Dynamic so one set per material can serve every frame slot.
         bindings.push_back({0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1,
@@ -428,6 +443,8 @@ namespace r4d::vulkan
                                 VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
         }
         bindings.push_back({kSamplerBinding, VK_DESCRIPTOR_TYPE_SAMPLER, 1,
+                            VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
+        bindings.push_back({kSamplerBinding + 1, VK_DESCRIPTOR_TYPE_SAMPLER, 1,
                             VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{
@@ -946,9 +963,20 @@ namespace r4d::vulkan
         auto normalDefault = createTexture(flatNormal, false, commandBuffer.value(), staging);
         if (!normalDefault) return normalDefault.error();
 
+        const ImageRgba8& skyImage =
+            model.environment.image.empty() ? white : model.environment.image;
+        const ImageRgba8& irradianceImage =
+            model.irradiance.image.empty() ? white : model.irradiance.image;
+        auto sky = createTexture(skyImage, true, commandBuffer.value(), staging);
+        if (!sky) return sky.error();
+        auto irradiance = createTexture(irradianceImage, true, commandBuffer.value(), staging);
+        if (!irradiance) return irradiance.error();
+
         m_textures.push_back(whiteSrgb.value());
         m_textures.push_back(whiteLinear.value());
         m_textures.push_back(normalDefault.value());
+        m_textures.push_back(sky.value());
+        m_textures.push_back(irradiance.value());
 
         std::vector<Image> modelTextures;
         for (const TextureImage& source : model.textures)
@@ -1013,7 +1041,7 @@ namespace r4d::vulkan
         const VkDescriptorPoolSize sizes[] = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, materialCount * 2},
             {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, materialCount * kTexturesPerMaterial},
-            {VK_DESCRIPTOR_TYPE_SAMPLER, materialCount},
+            {VK_DESCRIPTOR_TYPE_SAMPLER, materialCount * 2},
         };
 
         VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -1039,7 +1067,7 @@ namespace r4d::vulkan
                 i < model.materials.size() ? model.materials[i] : model.materials.front();
 
             const auto pick = [&](std::int32_t index, std::size_t fallback) -> VkImageView {
-                const std::size_t base = 3;   // defaults occupy slots 0..2
+                const std::size_t base = 5;   // defaults and environment occupy 0..4
                 if (index >= 0 && base + static_cast<std::size_t>(index) < m_textures.size())
                 {
                     return m_textures[base + static_cast<std::size_t>(index)].view;
@@ -1055,6 +1083,8 @@ namespace r4d::vulkan
             images[0].imageView = pick(material.baseColourTexture, 0);
             images[1].imageView = pick(material.metallicRoughnessTexture, 1);
             images[2].imageView = pick(material.normalTexture, 2);
+            images[3].imageView = m_textures[3].view;   // environment
+            images[4].imageView = m_textures[4].view;   // irradiance
             for (VkDescriptorImageInfo& image : images)
             {
                 image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1062,6 +1092,8 @@ namespace r4d::vulkan
 
             VkDescriptorImageInfo samplerInfo{};
             samplerInfo.sampler = m_sampler;
+            VkDescriptorImageInfo environmentSamplerInfo{};
+            environmentSamplerInfo.sampler = m_environmentSampler;
 
             std::vector<VkWriteDescriptorSet> writes;
             const auto addWrite = [&](std::uint32_t binding, VkDescriptorType type,
@@ -1085,6 +1117,8 @@ namespace r4d::vulkan
                          &images[t]);
             }
             addWrite(kSamplerBinding, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &samplerInfo);
+            addWrite(kSamplerBinding + 1, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr,
+                     &environmentSamplerInfo);
 
             vkUpdateDescriptorSets(m_context.device,
                                    static_cast<std::uint32_t>(writes.size()), writes.data(),
@@ -1500,6 +1534,10 @@ namespace r4d::vulkan
             if (m_sampler != VK_NULL_HANDLE)
             {
                 vkDestroySampler(m_context.device, m_sampler, nullptr);
+            }
+            if (m_environmentSampler != VK_NULL_HANDLE)
+            {
+                vkDestroySampler(m_context.device, m_environmentSampler, nullptr);
             }
             if (m_timestampPool != VK_NULL_HANDLE)
             {

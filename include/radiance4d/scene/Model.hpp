@@ -68,6 +68,11 @@ namespace r4d
         std::vector<Primitive> primitives;
         std::vector<Material> materials;
         std::vector<TextureImage> textures;
+
+        // Equirectangular sky and its cosine-convolved irradiance. Bound globally
+        // rather than per material.
+        TextureImage environment;
+        TextureImage irradiance;
         Bounds bounds;
 
         bool empty() const { return primitives.empty(); }
@@ -76,6 +81,10 @@ namespace r4d
 
     // Loads .gltf or .glb. Node transforms are flattened into the primitives.
     Result<Model> loadGltf(const std::filesystem::path& path);
+
+    TextureImage makeProceduralSky(std::uint32_t width, std::uint32_t height);
+    TextureImage makeIrradianceMap(std::uint32_t width, std::uint32_t height);
+    void attachDefaultEnvironment(Model& model);
 
     // Material grid used when no scene file is given.
     Model makeDemoScene(int columns = 7, int rows = 5, int sphereSegments = 48);

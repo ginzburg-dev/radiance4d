@@ -44,7 +44,8 @@ namespace r4d::d3d12
 
         // Each material owns a contiguous triple of SRVs: base colour,
         // metallic-roughness, normal. Missing maps point at a default texture.
-        constexpr UINT kTexturesPerMaterial = 3;
+        // base colour, metallic-roughness, normal, environment, irradiance
+        constexpr UINT kTexturesPerMaterial = 5;
 
         static_assert(sizeof(MaterialConstants) % sizeof(UINT32) == 0);
         constexpr UINT kMaterialRootConstants = sizeof(MaterialConstants) / sizeof(UINT32);
@@ -779,7 +780,8 @@ namespace r4d::d3d12
         rootParameters[2].DescriptorTable.NumDescriptorRanges = 1;
         rootParameters[2].DescriptorTable.pDescriptorRanges = &textureRange;
 
-        D3D12_STATIC_SAMPLER_DESC sampler{};
+        D3D12_STATIC_SAMPLER_DESC samplers[2]{};
+        D3D12_STATIC_SAMPLER_DESC& sampler = samplers[0];
         sampler.Filter = D3D12_FILTER_ANISOTROPIC;
         sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -791,12 +793,24 @@ namespace r4d::d3d12
         sampler.ShaderRegister = 0;
         sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        D3D12_STATIC_SAMPLER_DESC& environmentSampler = samplers[1];
+        environmentSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        environmentSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        environmentSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        environmentSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        environmentSampler.MaxAnisotropy = 1;
+        environmentSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        environmentSampler.MinLOD = 0.0f;
+        environmentSampler.MaxLOD = D3D12_FLOAT32_MAX;
+        environmentSampler.ShaderRegister = 1;
+        environmentSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
         rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
         rootDesc.Desc_1_1.NumParameters = static_cast<UINT>(std::size(rootParameters));
         rootDesc.Desc_1_1.pParameters = rootParameters;
-        rootDesc.Desc_1_1.NumStaticSamplers = 1;
-        rootDesc.Desc_1_1.pStaticSamplers = &sampler;
+        rootDesc.Desc_1_1.NumStaticSamplers = static_cast<UINT>(std::size(samplers));
+        rootDesc.Desc_1_1.pStaticSamplers = samplers;
         rootDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
         ComPtr<ID3DBlob> serialised;
@@ -1001,9 +1015,20 @@ namespace r4d::d3d12
         auto normalDefault = makeTexture(flatNormal, false);
         if (!normalDefault) return normalDefault.error();
 
+        const ImageRgba8& skyImage =
+            model.environment.image.empty() ? white : model.environment.image;
+        const ImageRgba8& irradianceImage =
+            model.irradiance.image.empty() ? white : model.irradiance.image;
+        auto sky = makeTexture(skyImage, true);
+        if (!sky) return sky.error();
+        auto irradiance = makeTexture(irradianceImage, true);
+        if (!irradiance) return irradiance.error();
+
         m_textures.push_back(whiteSrgb.value());
         m_textures.push_back(whiteLinear.value());
         m_textures.push_back(normalDefault.value());
+        m_textures.push_back(sky.value());
+        m_textures.push_back(irradiance.value());
 
         std::vector<ComPtr<ID3D12Resource>> modelTextures;
         modelTextures.reserve(model.textures.size());
@@ -1038,6 +1063,8 @@ namespace r4d::d3d12
         writeSrv(whiteSrgb.value().Get());
         writeSrv(whiteLinear.value().Get());
         writeSrv(normalDefault.value().Get());
+        writeSrv(sky.value().Get());
+        writeSrv(irradiance.value().Get());
 
         for (const Material& material : model.materials)
         {
@@ -1052,6 +1079,8 @@ namespace r4d::d3d12
             writeSrv(pick(material.baseColourTexture, whiteSrgb.value().Get()));
             writeSrv(pick(material.metallicRoughnessTexture, whiteLinear.value().Get()));
             writeSrv(pick(material.normalTexture, normalDefault.value().Get()));
+            writeSrv(sky.value().Get());
+            writeSrv(irradiance.value().Get());
         }
 
         R4D_INFO("Textures: {} uploaded, {} descriptors", model.textures.size(),

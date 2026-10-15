@@ -110,6 +110,28 @@ integrated GPU enumerates first, and an empty selector takes the first discrete 
 Validation messages go through `VK_EXT_debug_utils` into the same counting sink as the D3D12 debug
 layer, so `validationErrorCount()` means the same thing on both backends.
 
+## Image-based lighting
+
+An equirectangular sky is generated procedurally on the CPU at load, together with
+its cosine-convolved irradiance map. Procedural rather than an HDRI file: it needs
+no licensed asset, and it keeps the image-regression and parity tests
+deterministic.
+
+Diffuse reads the 32x16 irradiance map. Specular reads the sky mip chain with the
+level chosen from roughness, which is a box-filtered approximation of a GGX
+prefilter rather than the real thing, and the environment BRDF is the Karis
+split-sum approximation instead of a lookup table. Both are documented
+approximations, not stand-ins presented as the real algorithm.
+
+The two environment textures are bound to every material set rather than being
+per-material, which costs two descriptors per material and avoids a second
+descriptor set.
+
+Environment lookups use their own sampler: plain linear, wrap in u, clamp in v.
+Anisotropic filtering combined with an explicit LOD is implementation-defined, and
+it was measured to push the two backends from a one-unit difference to nine, so the
+parity test caught it. Clamping v also stops filtering bleeding across the poles.
+
 ## Validation
 
 | Mechanism | Purpose |

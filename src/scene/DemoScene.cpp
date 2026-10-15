@@ -152,6 +152,7 @@ namespace r4d
             }
         }
 
+        attachDefaultEnvironment(model);
         return model;
     }
 

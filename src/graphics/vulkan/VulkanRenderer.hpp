@@ -143,6 +143,7 @@ namespace r4d::vulkan
         VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
         std::vector<VkDescriptorSet> m_materialSets;
         VkSampler m_sampler = VK_NULL_HANDLE;
+        VkSampler m_environmentSampler = VK_NULL_HANDLE;
 
         VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_pipeline = VK_NULL_HANDLE;

@@ -371,6 +371,8 @@ namespace r4d
                      model.textures[i].image.height, model.textures[i].srgb);
         }
 
+        attachDefaultEnvironment(model);
+
         R4D_INFO("glTF: {} vertices, {} triangles, {} primitives, {} materials, {} textures",
                  model.vertices.size(), model.triangleCount(), model.primitives.size(),
                  model.materials.size(), model.textures.size());

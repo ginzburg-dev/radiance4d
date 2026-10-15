@@ -14,6 +14,7 @@ set(R4D_UNIT_TESTS
     ImageIO_test.cpp
     IncludeHygiene_test.cpp
     GaussianCloud_test.cpp
+    GaussianPly_test.cpp
 )
 
 # Tests that create a real D3D12 device on WARP.

@@ -3,6 +3,7 @@ add_library(r4d_scene STATIC
     DemoScene.cpp
     Environment.cpp
     GaussianCloud.cpp
+    GaussianPlyLoader.cpp
     GltfLoader.cpp
 )
 

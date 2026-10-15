@@ -56,16 +56,48 @@ namespace r4d
         return Vec3{g.sh[0], g.sh[1], g.sh[2]} * kShC0 + 0.5f;
     }
 
+    // Which quantile of the distance-to-centre distribution the framing sphere
+    // takes as its radius. Half the splats is the sphere that holds the subject:
+    //
+    //  - On a uniformly filled ball the median distance is cbrt(1/2) = 0.794 of
+    //    the radius, so a well-behaved cloud is framed much as its bounds would
+    //    frame it, a little tighter.
+    //  - On a reconstruction it ignores the tail outright. INRIA's `train` has a
+    //    median distance of 2.39 against a bounds radius of 145, and its 301
+    //    capture cameras stand a median 3.42 and at most 7.35 from the centre.
+    //    Camera::focusOn turns radius 2.39 into a camera 5.4 back, inside the
+    //    volume the scene was photographed from and so inside the volume it
+    //    reconstructs; radius 145 puts it 326 back, where the subject is a few
+    //    pixels wide.
+    inline constexpr float kFramingQuantile = 0.5f;
+
+    // Median centre, and the distance from it that `quantile` of the splats are
+    // within. Padded like recomputeBounds, but by the median largest scale
+    // rather than the maximum, so one huge splat cannot stretch it.
+    //
+    // This is for pointing a camera at the subject, not for culling: it
+    // deliberately leaves splats outside itself.
+    Sphere robustFramingSphere(const std::vector<Gaussian>& gaussians,
+                               float quantile = kFramingQuantile);
+
     struct GaussianCloud
     {
         std::vector<Gaussian> gaussians;
         Bounds bounds;
 
+        // Where to put a camera. A trained reconstruction sprays sparse
+        // low-opacity splats far outside the subject, so for real datasets this
+        // is very much smaller than the bounds: on INRIA's `train` scene, radius
+        // 2.4 against the bounds' 145.
+        Sphere framing;
+
         bool empty() const { return gaussians.empty(); }
         std::size_t count() const { return gaussians.size(); }
 
-        // Padded by each splat's largest scale, so the bounds cover the splat
-        // rather than just its centre.
+        // Fills both: bounds, padded by each splat's largest scale so they cover
+        // the splat rather than just its centre, and the framing sphere.
+        // Everything that needs the true extent — culling, the near and far
+        // planes, the merge with a mesh's bounds — still reads bounds.
         void recomputeBounds();
     };
 

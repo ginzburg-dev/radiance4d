@@ -25,7 +25,52 @@ namespace r4d
             }
             return glm::angleAxis(std::atan2(sine, glm::dot(from, to)), axis / sine);
         }
+
+        // Nearest-rank quantile, in place: always one of the samples, so the
+        // result is a distance the cloud actually has. nth_element keeps it
+        // linear, which matters at a million splats.
+        float quantileInPlace(std::vector<float>& values, float quantile)
+        {
+            const float position = std::clamp(quantile, 0.0f, 1.0f) *
+                                   static_cast<float>(values.size() - 1);
+            const auto rank = static_cast<std::size_t>(position);
+            std::nth_element(values.begin(), values.begin() + rank, values.end());
+            return values[rank];
+        }
     } // namespace
+
+    Sphere robustFramingSphere(const std::vector<Gaussian>& gaussians, float quantile)
+    {
+        if (gaussians.empty())
+        {
+            return Sphere{};
+        }
+
+        std::vector<float> scratch(gaussians.size());
+
+        // The median is the centre: on `train` it lands 0.07 units from the
+        // median of the 301 training camera positions, while the mean is dragged
+        // out by the tail and the bounds' centre misses by 35 units.
+        Vec3 centre{0.0f};
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            std::transform(gaussians.begin(), gaussians.end(), scratch.begin(),
+                           [axis](const Gaussian& g) { return g.position[axis]; });
+            centre[axis] = quantileInPlace(scratch, 0.5f);
+        }
+
+        std::transform(gaussians.begin(), gaussians.end(), scratch.begin(),
+                       [&centre](const Gaussian& g)
+                       { return glm::length(g.position - centre); });
+        const float radius = quantileInPlace(scratch, quantile);
+
+        std::transform(gaussians.begin(), gaussians.end(), scratch.begin(),
+                       [](const Gaussian& g)
+                       { return std::max({g.scale.x, g.scale.y, g.scale.z}); });
+        const float padding = quantileInPlace(scratch, 0.5f) * 3.0f;
+
+        return Sphere{centre, radius + padding};
+    }
 
     void GaussianCloud::recomputeBounds()
     {
@@ -47,6 +92,8 @@ namespace r4d
                 bounds.max = glm::max(bounds.max, high);
             }
         }
+
+        framing = robustFramingSphere(gaussians);
     }
 
     GaussianCloud makeProceduralGaussianCloud(std::uint32_t count, std::uint32_t seed)

@@ -66,6 +66,30 @@ namespace r4d
         return Bounds{glm::min(a.min, b.min), glm::max(a.max, b.max)};
     }
 
+    // What Camera::focusOn frames on. Kept distinct from Bounds because the two
+    // do not convert back and forth: a box's enclosing sphere is its
+    // half-diagonal, so round-tripping a sphere through a box inflates its
+    // radius by sqrt(3) and parks the camera 73% too far back.
+    struct Sphere
+    {
+        Vec3 centre{0.0f, 0.0f, 0.0f};
+        float radius = 0.0f;
+    };
+
+    inline Sphere boundingSphere(const Bounds& b) { return Sphere{b.centre(), b.radius()}; }
+
+    // Smallest sphere containing both, which for nested spheres is the outer one.
+    inline Sphere merge(const Sphere& a, const Sphere& b)
+    {
+        const Vec3 offset = b.centre - a.centre;
+        const float distance = glm::length(offset);
+        if (distance + b.radius <= a.radius) return a;
+        if (distance + a.radius <= b.radius) return b;
+
+        const float radius = (a.radius + b.radius + distance) * 0.5f;
+        return Sphere{a.centre + offset * ((radius - a.radius) / distance), radius};
+    }
+
     struct Model
     {
         std::vector<Vertex> vertices;

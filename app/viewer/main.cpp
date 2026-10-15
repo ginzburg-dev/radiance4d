@@ -48,6 +48,8 @@ namespace
         std::uint32_t splatCount = 0;
         std::uint32_t splatSeed = 1337;
         std::string splatPlyPath;
+        float orbitYawDegrees = 0.0f;
+        float orbitPitchDegrees = 0.0f;
         int gridColumns = 7;
         int gridRows = 5;
         bool help = false;
@@ -76,6 +78,11 @@ namespace
             "                               procedural cloud\n"
             "  --benchmark <n>              measure n frames after a warm-up and\n"
             "                               report timings; forces --no-debug\n"
+            "  --orbit-yaw <deg>            turn the view around the subject\n"
+            "  --orbit-pitch <deg>          tilt the view, as dragging does: negative\n"
+            "                               looks down on the subject from above.\n"
+            "                               Both default to 0, and together they are\n"
+            "                               what makes a chosen view reproducible\n"
             "  --exposure <value>           tone mapping exposure\n"
             "  --fixed-step <seconds>       advance animation by a fixed amount per\n"
             "                               frame instead of using the wall clock,\n"
@@ -193,6 +200,27 @@ namespace
             {
                 if (!next(value) || !parseUint(value, options.benchmarkFrames)) return false;
                 if (options.benchmarkFrames == 0) return false;
+            }
+            else if (arg == "--orbit-yaw" || arg == "--orbit-pitch")
+            {
+                if (!next(value)) return false;
+                float degrees = 0.0f;
+                try
+                {
+                    degrees = std::stof(std::string{value});
+                }
+                catch (const std::exception&)
+                {
+                    return false;
+                }
+                if (arg == "--orbit-yaw")
+                {
+                    options.orbitYawDegrees = degrees;
+                }
+                else
+                {
+                    options.orbitPitchDegrees = degrees;
+                }
             }
             else if (arg == "--exposure")
             {
@@ -380,6 +408,7 @@ namespace
             framed = true;
         }
 
+        camera.setAngles(options.orbitYawDegrees, options.orbitPitchDegrees);
         camera.focusOn(framing.centre, framed ? framing.radius : 1.0f);
         return true;
     }

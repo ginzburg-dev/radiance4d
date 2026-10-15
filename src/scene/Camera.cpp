@@ -46,6 +46,17 @@ namespace r4d
         m_position = m_target - forward() * m_distance;
     }
 
+    void Camera::setAngles(float yawDegrees, float pitchDegrees)
+    {
+        m_yaw = degreesToRadians(yawDegrees);
+        m_pitch = std::clamp(degreesToRadians(pitchDegrees), -kPitchLimit, kPitchLimit);
+        m_position = m_target - forward() * m_distance;
+    }
+
+    float Camera::yawDegrees() const { return radiansToDegrees(m_yaw); }
+
+    float Camera::pitchDegrees() const { return radiansToDegrees(m_pitch); }
+
     void Camera::update(const InputState& input, double deltaSeconds)
     {
         const float dt = static_cast<float>(deltaSeconds);

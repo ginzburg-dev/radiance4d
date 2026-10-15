@@ -13,6 +13,7 @@ set(R4D_UNIT_TESTS
     RollingAverage_test.cpp
     ImageIO_test.cpp
     IncludeHygiene_test.cpp
+    Camera_test.cpp
     GaussianCloud_test.cpp
     GaussianPly_test.cpp
 )

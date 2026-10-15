@@ -51,9 +51,11 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 loads a published 3DGS dataset instead. Each splat carries a position, a linear scale, a rotation
 quaternion, an opacity and 16 spherical-harmonic coefficients per channel; the vertex shader builds
 the 3D covariance, projects it with the perspective Jacobian into a screen-space conic, evaluates
-the SH colour from the view direction, and expands a quad from `SV_VertexID`. The pixel shader
-evaluates the conic and emits premultiplied alpha, and the splats are composited back to front in
-the order a compute radix sort writes earlier in the same frame.
+the SH colour from the view direction, and expands a quad from `SV_VertexID`. That Jacobian is a
+local linearisation of the perspective divide, so the off-axis ratio is clamped to 1.3 times the
+half-frustum before it is built, as the reference implementation does. The pixel shader evaluates
+the conic and emits premultiplied alpha, and the splats are composited back to front in the order a
+compute radix sort writes earlier in the same frame.
 
 Without `--scene` the splats replace the mesh scene; with one they share its depth buffer, so
 geometry occludes the splats behind it. Both backends draw the pass from the same HLSL, and the
@@ -152,13 +154,39 @@ The dataset's own capture poses say that is the right place to stand: the 301 ca
 `cameras.json` sit a median 3.42 and at most 7.35 units from the scene centre, and the median splat
 position lands 0.07 units from the median of those camera positions.
 
-There is still no dataset screenshot here, for two reasons that framing does not reach. The
-projection's Jacobian is not clamped to the frustum the way the reference implementation clamps it,
-so once the camera is close enough to be inside the reconstruction, off-axis splats acquire a
-covariance that smears them across the whole frame and the capture is a white wash; that is a
-projection defect, measured and written up, not a framing one. And the orbit camera always starts
-at yaw 0, which for `train` looks into foliage. With both addressed the scene does resolve — two
-locomotives, lettering, ballast and the hillside behind — but neither is fixed on `main` yet.
+**Why the Jacobian is clamped.** Without that clamp a published scene renders as a featureless
+near-white wash the moment the camera is close enough to stand inside the reconstruction: a splat
+off to the side gets a covariance that covers the whole frame. At the camera below, the clamped
+and unclamped captures differ over 99.98% of the frame, so this is the difference between a
+picture and nothing. It costs the procedural cloud almost nothing — the same 640x360 WARP render
+moves 33 of 230,400 pixels by one level, and the stored reference image still passes unchanged.
+The symptom only appears on a reconstruction because the old framing stood 326 units back, where
+every splat is near the axis.
+
+**Aiming a capture.** The orbit camera starts at yaw 0 and pitch 0, which for `train` looks into
+trackside foliage. `--orbit-yaw <deg>` and `--orbit-pitch <deg>` set that starting direction;
+both default to 0, so nothing moves unless they are passed, and they are what makes a chosen view
+reproducible from a command line. Pitch tilts the view the way dragging does, so a negative pitch
+looks down on the subject from above. No per-scene direction is baked in: 150° suits `train` and
+is written down here, not in the code.
+
+```
+radiance4d_viewer.exe --headless --splat-ply path/to/point_cloud.ply --orbit-yaw 150 --width 1280 --height 720 --frames 8 --fixed-step 0.016 --out docs/images/train-dataset.png
+```
+
+![INRIA train, 1.03M splats](docs/images/train-dataset.png)
+
+That command produced the image above, on an RTX 3080 Laptop GPU (driver 617.14) in a Debug build
+with the D3D12 debug layer on, and two runs of it are byte-identical. Rendered the same way on
+Vulkan, with the validation layer on, both backends report zero validation errors and the two
+captures agree to a max channel delta of 2, RMSE 0.0447, with 4,508 of 921,600 pixels differing
+(0.49%).
+
+The streaking along the bottom edge and across the sky is not a rendering defect to fix in the
+projection: those are the handful of splats with very large scales (the largest linear scale in
+this file is 16.2 units against a median of 0.016, and 1% of them exceed 0.37), seen from a camera standing among them. A
+visibility pass that drops splats whose screen-space extent is implausible is M4 work that has not
+been done.
 
 ## Measurements
 

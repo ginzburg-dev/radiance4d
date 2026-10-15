@@ -33,13 +33,35 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 | Exposure control | working |
 | Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
 | Cross-API image parity test | working |
-| 3D Gaussian Splatting | planned (M4) |
+| 3D Gaussian Splatting (projection, sorting, compositing) | working (D3D12) |
+| Gaussian splatting on Vulkan | planned (M4) |
+| Dataset loading, GPU sorting, tiled binning, SH colour | planned (M4) |
 | COLMAP / gsplat reconstruction | planned (M5) |
-| Hybrid mesh and Gaussian rendering | planned (M6) |
+| Hybrid mesh and Gaussian rendering | working (shared depth buffer) |
 | Temporal reprojection and denoising | planned (M7) |
 | Dynamic 4D Gaussians | planned (M8) |
 
 ![Material grid](docs/images/material-grid.png)
+
+## Gaussian splatting
+
+`--splats <n>` renders a deterministic procedural cloud of 3D Gaussians. Each splat carries a
+position, a linear scale, a rotation quaternion, an opacity and a colour; the vertex shader builds
+the 3D covariance, projects it with the perspective Jacobian into a screen-space conic, and expands
+a quad from `SV_VertexID`. The pixel shader evaluates the conic and emits premultiplied alpha, and
+the splats are composited back to front from a CPU depth sort.
+
+Without `--scene` the splats replace the mesh scene; with one they share its depth buffer, so
+geometry occludes the splats behind it.
+
+```
+radiance4d_viewer.exe --splats 20000
+radiance4d_viewer.exe --splats 1200 --scene assets/DamagedHelmet/DamagedHelmet.glb
+```
+
+Current limits: D3D12 only, one draw call per cloud with no culling or tiled binning, a full CPU
+sort every frame, and colour is the constant spherical-harmonic term rather than view-dependent
+bands.
 
 ## Measurements
 

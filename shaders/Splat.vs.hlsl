@@ -93,11 +93,20 @@ VSOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     const float invZ = 1.0f / viewPosition.z;
     const float invZ2 = invZ * invZ;
 
+    // The Jacobian is a local linearisation, so it is only valid near the axis.
+    // Clamping the off-axis ratio to 1.3 times the half-frustum, as the
+    // reference implementation does, keeps a splat off to the side from
+    // acquiring a covariance that smears it across the whole frame.
+    const float limitX = 1.3f * 0.5f * g_frame.splatViewport.x / focalX;
+    const float limitY = 1.3f * 0.5f * g_frame.splatViewport.y / focalY;
+    const float clampedX = clamp(viewPosition.x * invZ, -limitX, limitX) * viewPosition.z;
+    const float clampedY = clamp(viewPosition.y * invZ, -limitY, limitY) * viewPosition.z;
+
     // Screen y points down, so the second row carries the opposite sign to the
     // first. Getting that wrong mirrors every anisotropic splat.
     const float3x3 jacobian = float3x3(
-        focalX * invZ,  0.0f,          -focalX * viewPosition.x * invZ2,
-        0.0f,          -focalY * invZ,   focalY * viewPosition.y * invZ2,
+        focalX * invZ,  0.0f,          -focalX * clampedX * invZ2,
+        0.0f,          -focalY * invZ,   focalY * clampedY * invZ2,
         0.0f,           0.0f,            0.0f);
 
     const float3x3 viewRotation = (float3x3)g_frame.view;

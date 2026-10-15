@@ -59,6 +59,8 @@ radiance4d_viewer.exe --splats 20000
 radiance4d_viewer.exe --splats 1200 --scene assets/DamagedHelmet/DamagedHelmet.glb
 ```
 
+![Gaussian splats](docs/images/gaussian-splats.png)
+
 Current limits: D3D12 only, one draw call per cloud with no culling or tiled binning, a full CPU
 sort every frame, and colour is the constant spherical-harmonic term rather than view-dependent
 bands.

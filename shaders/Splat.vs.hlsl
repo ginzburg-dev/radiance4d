@@ -3,22 +3,12 @@
 // Projects a 3D Gaussian to a screen-space 2D Gaussian and emits a quad that
 // covers it. One instance per splat, four vertices generated from SV_VertexID,
 // so there is no vertex buffer.
-#include "Common.hlsli"
+#include "Splat.hlsli"
 
 ConstantBuffer<FrameConstants> g_frame : register(b0);
 
-struct Gaussian
-{
-    float3 position;
-    float  opacity;
-    float3 scale;
-    float  padding0;
-    float4 rotation;   // quaternion, xyzw, matching the glm storage order
-    // Coefficient-major: band k, channel c at sh[k * 3 + c].
-    float  sh[R4D_SH_COEFFICIENTS * 3];
-};
-
 StructuredBuffer<Gaussian> g_gaussians : register(t0);
+// Written by the compute sort, back to front, earlier in the same frame.
 StructuredBuffer<uint>     g_order     : register(t1);
 
 struct VSOutput

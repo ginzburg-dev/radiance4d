@@ -6,4 +6,9 @@ r4d_add_shader_target(r4d_shaders
         "${CMAKE_CURRENT_SOURCE_DIR}/Shadow.ps.hlsl"
         "${CMAKE_CURRENT_SOURCE_DIR}/Splat.vs.hlsl"
         "${CMAKE_CURRENT_SOURCE_DIR}/Splat.ps.hlsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SplatSortKey.cs.hlsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SplatSortHistogram.cs.hlsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SplatSortScanRows.cs.hlsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SplatSortScanTotals.cs.hlsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SplatSortScatter.cs.hlsl"
 )

@@ -73,11 +73,11 @@ scene heavy enough for the numbers to mean something, and a demo video.
 ## M4 — Static Gaussian splatting
 
 Done: GPU attribute storage, 3D covariance projection to a screen-space conic, alpha compositing
-back to front, a CPU depth sort, a procedural cloud for development and tests, and a shared depth
-buffer with the mesh pass.
+back to front, a CPU depth sort, a procedural cloud for development and tests, a shared depth
+buffer with the mesh pass, and both backends drawing it from the same shaders.
 
-Remaining: `.ply` dataset loading, visibility culling, tile-based binning, a GPU sort,
-spherical-harmonic colour, and the Vulkan port.
+Remaining: `.ply` dataset loading, visibility culling, tile-based binning, a GPU sort, and
+spherical-harmonic colour.
 
 ## M5 — Reconstruction pipeline
 

@@ -33,8 +33,7 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 | Exposure control | working |
 | Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
 | Cross-API image parity test | working |
-| 3D Gaussian Splatting (projection, sorting, compositing) | working (D3D12) |
-| Gaussian splatting on Vulkan | planned (M4) |
+| 3D Gaussian Splatting (projection, sorting, compositing) | working (both backends) |
 | Dataset loading, GPU sorting, tiled binning, SH colour | planned (M4) |
 | COLMAP / gsplat reconstruction | planned (M5) |
 | Hybrid mesh and Gaussian rendering | working (shared depth buffer) |
@@ -52,7 +51,8 @@ a quad from `SV_VertexID`. The pixel shader evaluates the conic and emits premul
 the splats are composited back to front from a CPU depth sort.
 
 Without `--scene` the splats replace the mesh scene; with one they share its depth buffer, so
-geometry occludes the splats behind it.
+geometry occludes the splats behind it. Both backends draw the pass from the same HLSL, and the
+parity test holds them to the same image.
 
 ```
 radiance4d_viewer.exe --splats 20000

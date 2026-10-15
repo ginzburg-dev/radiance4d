@@ -30,12 +30,17 @@ namespace r4d::vulkan
         {
             Mat4 viewProjection;
             Mat4 lightViewProjection;
+            Mat4 view;
             Vec3 cameraPosition;
             float timeSeconds;
             Vec3 ambient;
             float exposure;
             float shadowTexelSize;
             float shadowPadding[3];
+            Vec2 splatViewport;
+            Vec2 splatFocal;
+            float splatNearPlane;
+            float splatPadding[3];
             Light lights[kLightCount];
         };
 
@@ -1209,6 +1214,18 @@ namespace r4d::vulkan
         return image.value();
     }
 
+    Status VulkanRenderer::uploadGaussians(const GaussianCloud& cloud)
+    {
+        if (cloud.empty())
+        {
+            return Status::Ok();
+        }
+        // The splat pass lands on D3D12 first; porting it is the next step,
+        // and silently dropping the cloud would look like a renderer bug.
+        return makeError(ErrorCode::UnsupportedFeature,
+                         "the Vulkan backend has no splat pass yet; use --backend d3d12");
+    }
+
     Status VulkanRenderer::uploadModel(const Model& model)
     {
         if (model.empty() || model.vertices.empty() || model.indices.empty())
@@ -1551,6 +1568,7 @@ namespace r4d::vulkan
         FrameConstants constants{};
         constants.viewProjection = m_camera.projection * m_camera.view;
         constants.lightViewProjection = lightViewProjection();
+        constants.view = m_camera.view;
         constants.shadowTexelSize = 1.0f / static_cast<float>(kShadowMapSize);
         constants.cameraPosition = m_camera.position;
         constants.timeSeconds = timeSeconds;

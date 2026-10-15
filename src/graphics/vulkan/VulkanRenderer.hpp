@@ -23,6 +23,7 @@ namespace r4d::vulkan
         ~VulkanRenderer() override;
 
         Status uploadModel(const Model& model) override;
+        Status uploadGaussians(const GaussianCloud& cloud) override;
         void setCamera(const CameraParams& camera) override { m_camera = camera; }
         void setRenderSettings(const RenderSettings& settings) override
         {

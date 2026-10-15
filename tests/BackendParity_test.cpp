@@ -7,6 +7,7 @@
 #include <radiance4d/core/Log.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
 #include <radiance4d/scene/Camera.hpp>
+#include <radiance4d/scene/GaussianCloud.hpp>
 #include <radiance4d/scene/Model.hpp>
 
 #include "ImageCompare.hpp"
@@ -20,15 +21,19 @@ namespace
     constexpr double kFixedStep = 1.0 / 60.0;
     constexpr int kFrames = 8;
 
-    // Measured on an RTX 3080 Laptop GPU: max channel delta 1, RMSE 0.0018. The
-    // allowance is wider so a driver revision does not fail the build, but far
-    // too tight to hide a real divergence in conventions or shading.
+    // Measured on an RTX 3080 Laptop GPU: max channel delta 1, RMSE 0.0018 for
+    // the mesh scene and 0.014 for the splat cloud. The allowance is wider so a
+    // driver revision does not fail the build, but far too tight to hide a real
+    // divergence in conventions or shading.
     constexpr std::uint32_t kPerPixelTolerance = 2;
     constexpr std::uint32_t kMaxChannelDelta = 4;
     constexpr double kMaxRmse = 0.5;
     constexpr double kMaxDifferingFraction = 0.001;
 
-    r4d::Result<r4d::FrameCapture> renderWith(r4d::BackendType backend)
+    // Zero splats means the mesh demo scene; a count means the procedural cloud
+    // on its own, so a divergence can only have come from the splat pass.
+    r4d::Result<r4d::FrameCapture> renderWith(r4d::BackendType backend,
+                                              std::uint32_t splats = 0)
     {
         r4d::RendererDesc desc;
         desc.windowHandle = nullptr;
@@ -43,15 +48,29 @@ namespace
         }
         auto& gpu = *renderer.value();
 
-        const r4d::Model model = r4d::makeDemoScene(3, 2, 16);
-        if (auto status = gpu.uploadModel(model); !status)
+        r4d::Bounds bounds;
+        if (splats == 0)
         {
-            return status.error();
+            const r4d::Model model = r4d::makeDemoScene(3, 2, 16);
+            if (auto status = gpu.uploadModel(model); !status)
+            {
+                return status.error();
+            }
+            bounds = model.bounds;
+        }
+        else
+        {
+            const r4d::GaussianCloud cloud = r4d::makeProceduralGaussianCloud(splats, 1337);
+            if (auto status = gpu.uploadGaussians(cloud); !status)
+            {
+                return status.error();
+            }
+            bounds = cloud.bounds;
         }
 
         r4d::Camera camera;
         camera.setAspect(static_cast<float>(kWidth) / static_cast<float>(kHeight));
-        camera.focusOn(model.bounds.centre(), model.bounds.radius());
+        camera.focusOn(bounds.centre(), bounds.radius());
         gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(),
                                         camera.position()});
 
@@ -105,6 +124,38 @@ TEST_F(BackendParity, VulkanMatchesD3D12WithinTolerance)
             std::filesystem::path{R4D_TEST_DATA_DIR} / "backend_parity.png", vulkan.value(),
             d3d12.value());
         FAIL() << "the backends diverged: " << difference.message;
+    }
+
+    SUCCEED() << difference.message;
+}
+
+TEST_F(BackendParity, SplatsMatchD3D12WithinTolerance)
+{
+    // Thousands of blended layers in one draw: a conic, a Jacobian or a sort
+    // order that differs by a hair accumulates into something visible here.
+    constexpr std::uint32_t kSplats = 4000;
+
+    auto vulkan = renderWith(r4d::BackendType::Vulkan, kSplats);
+    if (!vulkan && vulkan.error().code == r4d::ErrorCode::UnsupportedFeature)
+    {
+        GTEST_SKIP() << "Vulkan backend unavailable: " << vulkan.error().message;
+    }
+    ASSERT_TRUE(vulkan.ok()) << vulkan.error().ToString();
+
+    auto d3d12 = renderWith(r4d::BackendType::D3D12, kSplats);
+    ASSERT_TRUE(d3d12.ok()) << d3d12.error().ToString();
+
+    const auto difference = r4d::testing::compareImages(vulkan.value(), d3d12.value(),
+                                                        kPerPixelTolerance);
+    ASSERT_TRUE(difference.comparable) << difference.message;
+
+    if (difference.maxChannelDelta > kMaxChannelDelta || difference.rmse > kMaxRmse ||
+        difference.differingFraction() > kMaxDifferingFraction)
+    {
+        r4d::testing::writeFailureArtefacts(
+            std::filesystem::path{R4D_TEST_DATA_DIR} / "backend_parity_splats.png",
+            vulkan.value(), d3d12.value());
+        FAIL() << "the splat pass diverged between the backends: " << difference.message;
     }
 
     SUCCEED() << difference.message;

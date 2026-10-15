@@ -1,6 +1,7 @@
 # Roadmap
 
-Each milestone is independently verifiable. Current position: M3 complete, showcase polish next.
+Each milestone is independently verifiable. Current position: M3 complete and M4 under way — the
+splat pass, `.ply` datasets and spherical-harmonic colour are in, the performance work is not.
 
 ## M0 — Environment and architecture
 
@@ -74,10 +75,25 @@ scene heavy enough for the numbers to mean something, and a demo video.
 
 Done: GPU attribute storage, 3D covariance projection to a screen-space conic, alpha compositing
 back to front, a CPU depth sort, a procedural cloud for development and tests, a shared depth
-buffer with the mesh pass, and both backends drawing it from the same shaders.
+buffer with the mesh pass, both backends drawing it from the same shaders, `.ply` dataset loading,
+and degree-3 spherical-harmonic colour evaluated per splat from the view direction.
 
-Remaining: `.ply` dataset loading, visibility culling, tile-based binning, a GPU sort, and
-spherical-harmonic colour.
+Remaining: visibility culling, tile-based binning, and a GPU sort. Those three are deliberately
+last: they cannot be honestly measured against 20k procedural splats, and need the million-splat
+workload a real dataset provides.
+
+The `.ply` loader is covered by synthetic files the test suite writes itself, which assert the
+conversions numerically — log-scales exponentiated, the quaternion normalised and read as `wxyz`,
+the opacity sigmoid, and the channel-major SH transposed into the GPU layout. Published scenes are
+hundreds of megabytes to several gigabytes and cannot live in the repository, so loading one is a
+manual step, written down in the README. It has not been done yet.
+
+Carrying degree 3 costs 48 of the 60 floats per splat: the GPU struct is 240 bytes, so a million
+splats is 240 MB of attributes. Splitting the SH into its own buffer, so that culling and binning
+only touch geometry, is the obvious follow-up once those passes exist.
+
+No coordinate-system conversion is applied on load. Datasets authored in COLMAP's frame may appear
+mirrored relative to their published renders; that is the first thing to check against a real scene.
 
 ## M5 — Reconstruction pipeline
 

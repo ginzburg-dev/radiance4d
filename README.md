@@ -7,7 +7,7 @@ C++20, with native Direct3D 12 and Vulkan backends.
 
 ## Status
 
-Milestone M3 complete. Features marked *planned* are not implemented.
+Milestone M3 complete, M4 under way. Features marked *planned* are not implemented.
 
 | Area | Status |
 |---|---|
@@ -34,7 +34,9 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 | Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
 | Cross-API image parity test | working |
 | 3D Gaussian Splatting (projection, sorting, compositing) | working (both backends) |
-| Dataset loading, GPU sorting, tiled binning, SH colour | planned (M4) |
+| 3DGS `.ply` dataset loading | working (not yet run against a published scene) |
+| Spherical-harmonic colour (degree 3) | working (both backends) |
+| Splat visibility culling, tiled binning, GPU sorting | planned (M4) |
 | COLMAP / gsplat reconstruction | planned (M5) |
 | Hybrid mesh and Gaussian rendering | working (shared depth buffer) |
 | Temporal reprojection and denoising | planned (M7) |
@@ -44,11 +46,13 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 
 ## Gaussian splatting
 
-`--splats <n>` renders a deterministic procedural cloud of 3D Gaussians. Each splat carries a
-position, a linear scale, a rotation quaternion, an opacity and a colour; the vertex shader builds
-the 3D covariance, projects it with the perspective Jacobian into a screen-space conic, and expands
-a quad from `SV_VertexID`. The pixel shader evaluates the conic and emits premultiplied alpha, and
-the splats are composited back to front from a CPU depth sort.
+`--splats <n>` renders a deterministic procedural cloud of 3D Gaussians, and `--splat-ply <file>`
+loads a published 3DGS dataset instead. Each splat carries a position, a linear scale, a rotation
+quaternion, an opacity and 16 spherical-harmonic coefficients per channel; the vertex shader builds
+the 3D covariance, projects it with the perspective Jacobian into a screen-space conic, evaluates
+the SH colour from the view direction, and expands a quad from `SV_VertexID`. The pixel shader
+evaluates the conic and emits premultiplied alpha, and the splats are composited back to front from
+a CPU depth sort.
 
 Without `--scene` the splats replace the mesh scene; with one they share its depth buffer, so
 geometry occludes the splats behind it. Both backends draw the pass from the same HLSL, and the
@@ -56,14 +60,30 @@ parity test holds them to the same image.
 
 ```
 radiance4d_viewer.exe --splats 20000
+radiance4d_viewer.exe --splat-ply path/to/point_cloud.ply
 radiance4d_viewer.exe --splats 1200 --scene assets/DamagedHelmet/DamagedHelmet.glb
 ```
 
 ![Gaussian splats](docs/images/gaussian-splats.png)
 
-Current limits: D3D12 only, one draw call per cloud with no culling or tiled binning, a full CPU
-sort every frame, and colour is the constant spherical-harmonic term rather than view-dependent
-bands.
+### Datasets
+
+The loader takes the binary little-endian `.ply` the 3DGS reference implementation writes. Header
+properties are matched by name, since exporters disagree on field order, and the stored activations
+are converted on load: scales are exponentiated, the `wxyz` quaternion is normalised, and the
+opacity goes through a sigmoid. Degree 0, 1, 2 and 3 files all load; bands the file does not carry
+stay zero. ASCII and big-endian files, list properties and multi-element files are refused with an
+error rather than guessed at.
+
+Published scenes are hundreds of megabytes to several gigabytes, so none is committed here and the
+test suite writes its own synthetic files instead. **Loading a real scene is a manual step and has
+not been done yet** — download a trained `point_cloud.ply` (for example from the INRIA 3DGS release)
+and pass it to `--splat-ply`. No coordinate-system conversion is applied, so a scene in COLMAP's
+frame may come out mirrored against its published render; that is the first thing to check.
+
+Current limits: one draw call per cloud with no visibility culling or tiled binning, a full CPU sort
+every frame, and 240 bytes of attributes per splat (degree-3 SH is 192 of them), which is 240 MB for
+a million-splat scene.
 
 ## Measurements
 
@@ -115,7 +135,8 @@ See [docs/BUILDING.md](docs/BUILDING.md).
 build/windows-d3d12/bin/Debug/radiance4d_viewer.exe
 ```
 
-`--backend <d3d12|vulkan>`, `--scene <file.gltf>`, `--adapter <index|warp|name>`, `--no-vsync`, `--gpu-validation`,
+`--backend <d3d12|vulkan>`, `--scene <file.gltf>`, `--splats <n>`, `--splat-ply <file.ply>`,
+`--adapter <index|warp|name>`, `--no-vsync`, `--gpu-validation`,
 `--frames <n>`, `--resize-cycles <n>`, `--log-level <0..5>`. `--help` lists all flags.
 Without `--scene` a built-in material grid is rendered. Esc quits, F1 toggles vsync, F2 switches
 camera mode; left mouse orbits, right pans, wheel zooms, WASDQE moves in free-fly. Exit code is non-zero if the

@@ -96,6 +96,8 @@ namespace r4d::d3d12
         Status createShadowMap();
         Status createShadowPipeline(const std::filesystem::path& shaderDirectory);
         Status createSplatPipeline(const std::filesystem::path& shaderDirectory);
+        Status createSortPipelines(const std::filesystem::path& shaderDirectory);
+        void sortSplats(UINT frameIndex);
         void renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
                           std::uint32_t& triangles);
         void renderShadowPass();
@@ -156,12 +158,42 @@ namespace r4d::d3d12
         ComPtr<ID3D12PipelineState> m_splatPipeline;
         ComPtr<ID3D12Resource> m_gaussianBuffer;
         // One per frame in flight: the depth order is rewritten every frame.
+        // Device-local now that compute writes it, and also the sort's values-A
+        // buffer -- four passes ping-pong and land the result back in here.
         std::array<ComPtr<ID3D12Resource>, kFramesInFlight> m_gaussianOrder{};
-        std::array<std::uint32_t*, kFramesInFlight> m_gaussianOrderCpu{};
-        std::vector<Vec3> m_gaussianPositions;
-        std::vector<std::uint32_t> m_gaussianSorted;
-        std::vector<float> m_gaussianDepths;
         std::uint32_t m_gaussianCount = 0;
+
+        // The stages of one radix-sort pass, in dispatch order. The key build
+        // runs once per frame rather than once per pass.
+        enum class SortStage : std::size_t
+        {
+            Key,
+            Histogram,
+            ScanRows,
+            ScanTotals,
+            Scatter,
+            Count
+        };
+
+        // Scratch for the sort, one set per frame in flight so that a frame
+        // never writes what the previous one is still reading. The per-slot
+        // fence wait in renderFrame is what makes that safe without a barrier.
+        struct SortBuffers
+        {
+            ComPtr<ID3D12Resource> keysA;
+            ComPtr<ID3D12Resource> keysB;
+            ComPtr<ID3D12Resource> valuesB;
+            ComPtr<ID3D12Resource> histogram;
+            ComPtr<ID3D12Resource> digitBase;
+        };
+        std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
+        ComPtr<ID3D12RootSignature> m_sortRootSignature;
+        std::array<ComPtr<ID3D12PipelineState>,
+                   static_cast<std::size_t>(SortStage::Count)>
+            m_sortPipelines{};
+        std::uint32_t m_sortTileCount = 0;
+        // m_gaussianCount rounded up to a whole number of tiles.
+        std::uint32_t m_sortPaddedCount = 0;
 
         ComPtr<ID3D12Resource> m_offscreenTarget;
         ComPtr<ID3D12Resource> m_captureReadback;

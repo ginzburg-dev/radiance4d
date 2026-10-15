@@ -64,6 +64,31 @@ namespace r4d::d3d12
         // Closer than this the Jacobian is meaningless, so the splat is dropped.
         constexpr float kSplatNearPlane = 0.05f;
 
+        // All four must match SplatSort.hlsli.
+        constexpr UINT kSortGroupSize = 256;
+        constexpr UINT kSortDigitBits = 8;
+        constexpr UINT kSortBuckets = 1u << kSortDigitBits;
+        constexpr UINT kSortPasses = 32 / kSortDigitBits;
+        static_assert(kSortBuckets == kSortGroupSize,
+                      "SplatSortScanTotals scans every digit's total in one group");
+
+        // Mirrors SortConstants in SplatSort.hlsli.
+        struct SortConstants
+        {
+            std::uint32_t count;
+            std::uint32_t splatCount;
+            std::uint32_t tileCount;
+            std::uint32_t shift;
+            std::uint32_t sourceIsB;
+            std::uint32_t padding[3];
+        };
+        static_assert(sizeof(SortConstants) == 32);
+        constexpr UINT kSortRootConstants = sizeof(SortConstants) / sizeof(UINT32);
+
+        // One root descriptor per buffer the sort binds: both halves of the
+        // key and value ping-pong, the per-tile histograms and the digit bases.
+        constexpr UINT kSortUavCount = 6;
+
         // Must match the optimised clear value the render target is created with.
         constexpr float kClearColour[4] = {0.043f, 0.047f, 0.063f, 1.0f};
         constexpr float kClearDepth = 1.0f;
@@ -99,6 +124,28 @@ namespace r4d::d3d12
             desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
             desc.Flags = D3D12_RESOURCE_FLAG_NONE;
             return desc;
+        }
+
+        // Orders every preceding access against every following one. The sort
+        // stages each read what the one before wrote, across six buffers, which
+        // is exactly what a global barrier says in one line.
+        void submitGlobalBarrier(ID3D12GraphicsCommandList7* commandList,
+                                 D3D12_BARRIER_SYNC syncBefore,
+                                 D3D12_BARRIER_SYNC syncAfter,
+                                 D3D12_BARRIER_ACCESS accessBefore,
+                                 D3D12_BARRIER_ACCESS accessAfter)
+        {
+            D3D12_GLOBAL_BARRIER barrier{};
+            barrier.SyncBefore = syncBefore;
+            barrier.SyncAfter = syncAfter;
+            barrier.AccessBefore = accessBefore;
+            barrier.AccessAfter = accessAfter;
+
+            D3D12_BARRIER_GROUP group{};
+            group.Type = D3D12_BARRIER_TYPE_GLOBAL;
+            group.NumBarriers = 1;
+            group.pGlobalBarriers = &barrier;
+            commandList->Barrier(1, &group);
         }
 
         D3D12_TEXTURE_BARRIER textureBarrier(ID3D12Resource* resource,
@@ -226,6 +273,9 @@ namespace r4d::d3d12
         m_shadowPipeline.Reset();
         m_splatPipeline.Reset();
         m_splatRootSignature.Reset();
+        m_sortPipelines = {};
+        m_sortRootSignature.Reset();
+        m_sortBuffers = {};
         m_gaussianBuffer.Reset();
         m_gaussianOrder = {};
         m_shadowMap.Reset();
@@ -307,6 +357,7 @@ namespace r4d::d3d12
         R4D_TRY(createPipeline(shaderDirectory));
         R4D_TRY(createShadowPipeline(shaderDirectory));
         R4D_TRY(createSplatPipeline(shaderDirectory));
+        R4D_TRY(createSortPipelines(shaderDirectory));
 
         if (!m_headless)
         {
@@ -1415,11 +1466,10 @@ namespace r4d::d3d12
         waitForGpuIdle();
         m_gaussianBuffer.Reset();
         m_gaussianOrder = {};
-        m_gaussianOrderCpu = {};
-        m_gaussianPositions.clear();
-        m_gaussianSorted.clear();
-        m_gaussianDepths.clear();
+        m_sortBuffers = {};
         m_gaussianCount = 0;
+        m_sortTileCount = 0;
+        m_sortPaddedCount = 0;
 
         if (cloud.empty())
         {
@@ -1454,24 +1504,45 @@ namespace r4d::d3d12
             upload->Unmap(0, nullptr);
         }
 
-        // The depth order is rewritten every frame, so it stays in host memory
-        // the shader reads directly, one buffer per frame in flight.
-        const auto orderDesc =
-            bufferDesc(static_cast<UINT64>(count) * sizeof(std::uint32_t));
+        // Every kernel but the key build runs without a bounds check, so the
+        // sort buffers hold a whole number of tiles and the key build fills the
+        // tail with the largest possible key.
+        m_sortTileCount = (count + kSortGroupSize - 1) / kSortGroupSize;
+        m_sortPaddedCount = m_sortTileCount * kSortGroupSize;
+
+        // Digit-major, one row of per-tile counts per digit.
+        const UINT64 histogramEntries =
+            static_cast<UINT64>(kSortBuckets) * m_sortTileCount;
+
+        const auto createSortBuffer = [&](UINT64 entries, const wchar_t* name,
+                                          ComPtr<ID3D12Resource>& out) -> Status {
+            auto desc = bufferDesc(entries * sizeof(std::uint32_t));
+            desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+            R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+                                                     &desc, D3D12_RESOURCE_STATE_COMMON,
+                                                     nullptr, IID_PPV_ARGS(&out)),
+                   "CreateCommittedResource (splat sort buffer)");
+            out->SetName(name);
+            return Status::Ok();
+        };
+
         for (UINT i = 0; i < kFramesInFlight; ++i)
         {
-            R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
-                                                     &orderDesc,
-                                                     D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                     nullptr,
-                                                     IID_PPV_ARGS(&m_gaussianOrder[i])),
-                   "CreateCommittedResource (gaussian order)");
-            m_gaussianOrder[i]->SetName(L"Radiance4D Gaussian Order");
-
-            void* mapped = nullptr;
-            const D3D12_RANGE noRead{0, 0};
-            R4D_HR(m_gaussianOrder[i]->Map(0, &noRead, &mapped), "Map (gaussian order)");
-            m_gaussianOrderCpu[i] = static_cast<std::uint32_t*>(mapped);
+            SortBuffers& sort = m_sortBuffers[i];
+            // The order the vertex shader reads is the sort's values-A buffer:
+            // with an even number of passes the result lands back in it.
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, L"Radiance4D Gaussian Order",
+                                     m_gaussianOrder[i]));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, L"Radiance4D Splat Sort Keys A",
+                                     sort.keysA));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, L"Radiance4D Splat Sort Keys B",
+                                     sort.keysB));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, L"Radiance4D Splat Sort Values B",
+                                     sort.valuesB));
+            R4D_TRY(createSortBuffer(histogramEntries, L"Radiance4D Splat Sort Histogram",
+                                     sort.histogram));
+            R4D_TRY(createSortBuffer(kSortBuckets, L"Radiance4D Splat Sort Digit Bases",
+                                     sort.digitBase));
         }
 
         auto& frame = m_frames[0];
@@ -1483,7 +1554,10 @@ namespace r4d::d3d12
 
         D3D12_BUFFER_BARRIER barrier{};
         barrier.SyncBefore = D3D12_BARRIER_SYNC_COPY;
-        barrier.SyncAfter = D3D12_BARRIER_SYNC_VERTEX_SHADING;
+        // The sort reads the positions out of the same buffer the vertex
+        // shader rasterises from, so both stages are in the sync scope.
+        barrier.SyncAfter =
+            D3D12_BARRIER_SYNC_VERTEX_SHADING | D3D12_BARRIER_SYNC_COMPUTE_SHADING;
         barrier.AccessBefore = D3D12_BARRIER_ACCESS_COPY_DEST;
         barrier.AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
         barrier.pResource = m_gaussianBuffer.Get();
@@ -1505,18 +1579,90 @@ namespace r4d::d3d12
         R4D_TRY(waitForFenceValue(uploadFence));
         frame.fenceValue = uploadFence;
 
-        m_gaussianPositions.reserve(count);
-        for (const Gaussian& g : cloud.gaussians)
-        {
-            m_gaussianPositions.push_back(g.position);
-        }
-        m_gaussianSorted.resize(count);
-        m_gaussianDepths.resize(count);
         m_gaussianCount = count;
 
-        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB)", count,
-                 static_cast<double>(splatBytes) / (1024.0 * 1024.0));
+        const double sortMiB = static_cast<double>(kFramesInFlight) *
+                               static_cast<double>(4 * m_sortPaddedCount +
+                                                   histogramEntries + kSortBuckets) *
+                               sizeof(std::uint32_t) / (1024.0 * 1024.0);
+        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB), sorted on the GPU in {} "
+                 "tiles ({:.1f} MiB of sort buffers)",
+                 count, static_cast<double>(splatBytes) / (1024.0 * 1024.0),
+                 m_sortTileCount, sortMiB);
         return Status::Ok();
+    }
+
+    void D3D12Renderer::sortSplats(UINT frameIndex)
+    {
+        if (m_gaussianCount == 0 || !m_sortRootSignature)
+        {
+            return;
+        }
+
+        const FrameContext& frame = m_frames[frameIndex];
+        SortBuffers& sort = m_sortBuffers[frameIndex];
+
+        // This slot's buffers were last touched two frames ago, and renderFrame
+        // has already waited on that frame's fence, so nothing here needs a
+        // barrier against the previous frame's reads.
+        m_commandList->SetComputeRootSignature(m_sortRootSignature.Get());
+        m_commandList->SetComputeRootConstantBufferView(
+            0, frame.constantBuffer->GetGPUVirtualAddress());
+        m_commandList->SetComputeRootShaderResourceView(
+            2, m_gaussianBuffer->GetGPUVirtualAddress());
+
+        ID3D12Resource* const buffers[kSortUavCount] = {
+            sort.keysA.Get(),     sort.keysB.Get(),     m_gaussianOrder[frameIndex].Get(),
+            sort.valuesB.Get(),   sort.histogram.Get(), sort.digitBase.Get()};
+        for (UINT i = 0; i < kSortUavCount; ++i)
+        {
+            m_commandList->SetComputeRootUnorderedAccessView(
+                3 + i, buffers[i]->GetGPUVirtualAddress());
+        }
+
+        SortConstants constants{};
+        constants.count = m_sortPaddedCount;
+        constants.splatCount = m_gaussianCount;
+        constants.tileCount = m_sortTileCount;
+
+        const auto dispatch = [&](SortStage stage, UINT groups) {
+            m_commandList->SetPipelineState(
+                m_sortPipelines[static_cast<std::size_t>(stage)].Get());
+            m_commandList->SetComputeRoot32BitConstants(1, kSortRootConstants, &constants,
+                                                        0);
+            m_commandList->Dispatch(groups, 1, 1);
+            submitGlobalBarrier(m_commandList.Get(), D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                                D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
+        };
+
+        dispatch(SortStage::Key, m_sortTileCount);
+        for (UINT pass = 0; pass < kSortPasses; ++pass)
+        {
+            constants.shift = pass * kSortDigitBits;
+            // Pass 0 reads A, and an even pass count brings the result home.
+            constants.sourceIsB = pass & 1u;
+            dispatch(SortStage::Histogram, m_sortTileCount);
+            dispatch(SortStage::ScanRows, kSortBuckets);
+            dispatch(SortStage::ScanTotals, 1);
+            dispatch(SortStage::Scatter, m_sortTileCount);
+        }
+
+        D3D12_BUFFER_BARRIER barrier{};
+        barrier.SyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+        barrier.SyncAfter = D3D12_BARRIER_SYNC_VERTEX_SHADING;
+        barrier.AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+        barrier.AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+        barrier.pResource = m_gaussianOrder[frameIndex].Get();
+        barrier.Offset = 0;
+        barrier.Size = UINT64_MAX;
+
+        D3D12_BARRIER_GROUP group{};
+        group.Type = D3D12_BARRIER_TYPE_BUFFER;
+        group.NumBarriers = 1;
+        group.pBufferBarriers = &barrier;
+        m_commandList->Barrier(1, &group);
     }
 
     void D3D12Renderer::renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
@@ -1528,23 +1674,7 @@ namespace r4d::d3d12
         }
 
         // Alpha compositing is order-dependent, so the splats go far to near.
-        // A full CPU sort every frame; a GPU radix sort replaces it once the
-        // counts justify one.
-        const Mat4& view = m_camera.view;
-        for (std::uint32_t i = 0; i < m_gaussianCount; ++i)
-        {
-            const Vec3& p = m_gaussianPositions[i];
-            m_gaussianDepths[i] =
-                view[0][2] * p.x + view[1][2] * p.y + view[2][2] * p.z + view[3][2];
-            m_gaussianSorted[i] = i;
-        }
-        std::sort(m_gaussianSorted.begin(), m_gaussianSorted.end(),
-                  [this](std::uint32_t a, std::uint32_t b) {
-                      return m_gaussianDepths[a] > m_gaussianDepths[b];
-                  });
-        std::memcpy(m_gaussianOrderCpu[frameIndex], m_gaussianSorted.data(),
-                    m_gaussianCount * sizeof(std::uint32_t));
-
+        // sortSplats produced that order on the GPU earlier in this frame.
         auto& frame = m_frames[frameIndex];
         m_commandList->SetPipelineState(m_splatPipeline.Get());
         m_commandList->SetGraphicsRootSignature(m_splatRootSignature.Get());
@@ -1559,6 +1689,95 @@ namespace r4d::d3d12
 
         ++drawCalls;
         triangles += m_gaussianCount * 2;
+    }
+
+    Status D3D12Renderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
+    {
+        // Buffers only, so root descriptors are enough here too: no heap, no
+        // table. 24 DWORDs of a 64-DWORD budget.
+        D3D12_ROOT_PARAMETER1 rootParameters[3 + kSortUavCount]{};
+
+        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParameters[0].Descriptor.ShaderRegister = 0;
+        rootParameters[0].Descriptor.Flags =
+            D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+
+        // The per-pass constants change between dispatches, so they ride in the
+        // root signature rather than in a buffer that would need re-uploading.
+        rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParameters[1].Constants.ShaderRegister = 1;
+        rootParameters[1].Constants.Num32BitValues = kSortRootConstants;
+
+        rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+        rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParameters[2].Descriptor.ShaderRegister = 0;
+        rootParameters[2].Descriptor.Flags =
+            D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+
+        for (UINT i = 0; i < kSortUavCount; ++i)
+        {
+            D3D12_ROOT_PARAMETER1& parameter = rootParameters[3 + i];
+            parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+            parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+            parameter.Descriptor.ShaderRegister = i;
+            parameter.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+        }
+
+        D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
+        rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
+        rootDesc.Desc_1_1.NumParameters = static_cast<UINT>(std::size(rootParameters));
+        rootDesc.Desc_1_1.pParameters = rootParameters;
+        rootDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+        ComPtr<ID3DBlob> serialised;
+        ComPtr<ID3DBlob> rootError;
+        const HRESULT hr = ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised,
+                                                                  &rootError);
+        if (FAILED(hr))
+        {
+            const char* detail = rootError
+                                     ? static_cast<const char*>(rootError->GetBufferPointer())
+                                     : "(no detail)";
+            return hresultError(ErrorCode::ApiCallFailed, hr,
+                                std::format("SerializeVersionedRootSignature (splat "
+                                            "sort): {}",
+                                            detail));
+        }
+
+        R4D_HR(m_device->CreateRootSignature(0, serialised->GetBufferPointer(),
+                                             serialised->GetBufferSize(),
+                                             IID_PPV_ARGS(&m_sortRootSignature)),
+               "CreateRootSignature (splat sort)");
+        m_sortRootSignature->SetName(L"Radiance4D Splat Sort Root Signature");
+
+        // Indexed by SortStage, so the order of these must match the enum.
+        static constexpr std::string_view kStageShaders[] = {
+            "SplatSortKey.cs.dxil", "SplatSortHistogram.cs.dxil",
+            "SplatSortScanRows.cs.dxil", "SplatSortScanTotals.cs.dxil",
+            "SplatSortScatter.cs.dxil"};
+        static_assert(std::size(kStageShaders) ==
+                      static_cast<std::size_t>(SortStage::Count));
+
+        for (std::size_t i = 0; i < std::size(kStageShaders); ++i)
+        {
+            auto blob = loadShaderBlob(shaderDirectory, kStageShaders[i]);
+            if (!blob)
+            {
+                return blob.error();
+            }
+
+            D3D12_COMPUTE_PIPELINE_STATE_DESC desc{};
+            desc.pRootSignature = m_sortRootSignature.Get();
+            desc.CS.pShaderBytecode = blob.value().data();
+            desc.CS.BytecodeLength = blob.value().size();
+            R4D_HR(m_device->CreateComputePipelineState(&desc,
+                                                        IID_PPV_ARGS(&m_sortPipelines[i])),
+                   "CreateComputePipelineState (splat sort)");
+        }
+
+        return Status::Ok();
     }
 
     Status D3D12Renderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
@@ -1781,6 +2000,10 @@ namespace r4d::d3d12
                "ID3D12GraphicsCommandList::Reset");
 
         m_profiler.beginFrame(m_commandList.Get(), frameIndex);
+
+        // Before anything binds a render target: the splat order for this frame
+        // is produced by compute, and the vertex shader reads it further down.
+        sortSplats(frameIndex);
 
         m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
         if (m_srvHeap)

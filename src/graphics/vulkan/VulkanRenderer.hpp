@@ -104,7 +104,10 @@ namespace r4d::vulkan
         Status createPipeline(const std::filesystem::path& shaderDirectory);
         Status createSplatPipeline(const std::filesystem::path& shaderDirectory);
         Status createSplatDescriptors();
+        Status createSortPipelines(const std::filesystem::path& shaderDirectory);
+        Status createSortDescriptors();
         void destroySplatBuffers();
+        void sortSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex);
         void renderSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex,
                           std::uint32_t& drawCalls, std::uint32_t& triangles);
         Status createDescriptorSets(const Model& model);
@@ -176,11 +179,48 @@ namespace r4d::vulkan
         std::array<VkDescriptorSet, kFramesInFlight> m_splatSets{};
         Buffer m_gaussianBuffer;
         // One per frame in flight: the depth order is rewritten every frame.
+        // Device-local now that compute writes it, and also the sort's values-A
+        // buffer -- four passes ping-pong and land the result back in here.
         std::array<Buffer, kFramesInFlight> m_gaussianOrder{};
-        std::vector<Vec3> m_gaussianPositions;
-        std::vector<std::uint32_t> m_gaussianSorted;
-        std::vector<float> m_gaussianDepths;
         std::uint32_t m_gaussianCount = 0;
+
+        // The stages of one radix-sort pass, in dispatch order. The key build
+        // runs once per frame rather than once per pass.
+        enum class SortStage : std::size_t
+        {
+            Key,
+            Histogram,
+            ScanRows,
+            ScanTotals,
+            Scatter,
+            Count
+        };
+
+        // Scratch for the sort, one set per frame in flight so that a frame
+        // never writes what the previous one is still reading. The per-slot
+        // fence wait in renderFrame is what makes that safe without a barrier.
+        struct SortBuffers
+        {
+            Buffer keysA;
+            Buffer keysB;
+            Buffer valuesB;
+            Buffer histogram;
+            Buffer digitBase;
+        };
+        std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
+        VkDescriptorSetLayout m_sortSetLayout = VK_NULL_HANDLE;
+        VkPipelineLayout m_sortPipelineLayout = VK_NULL_HANDLE;
+        std::array<VkPipeline, static_cast<std::size_t>(SortStage::Count)>
+            m_sortPipelines{};
+        VkDescriptorPool m_sortDescriptorPool = VK_NULL_HANDLE;
+        std::array<VkDescriptorSet, kFramesInFlight> m_sortSets{};
+        // One section per pass, picked with a dynamic offset. Nothing in it
+        // changes with the camera, so it is written once at upload.
+        Buffer m_sortConstants;
+        VkDeviceSize m_sortConstantStride = 0;
+        std::uint32_t m_sortTileCount = 0;
+        // m_gaussianCount rounded up to a whole number of tiles.
+        std::uint32_t m_sortPaddedCount = 0;
 
         Buffer m_vertexBuffer;
         Buffer m_indexBuffer;

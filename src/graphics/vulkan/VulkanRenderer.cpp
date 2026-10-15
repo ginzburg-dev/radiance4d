@@ -72,6 +72,53 @@ namespace r4d::vulkan
         // Must match the D3D12 backend.
         constexpr float kSplatNearPlane = 0.05f;
 
+        // The sort's b1 and u0..u5, moved by the same shifts.
+        constexpr std::uint32_t kSortConstantsBinding = 1;
+        constexpr std::uint32_t kSortBufferBinding = R4D_VK_U_SHIFT;
+
+        // All four must match SplatSort.hlsli, and the D3D12 backend.
+        constexpr std::uint32_t kSortGroupSize = 256;
+        constexpr std::uint32_t kSortDigitBits = 8;
+        constexpr std::uint32_t kSortBuckets = 1u << kSortDigitBits;
+        constexpr std::uint32_t kSortPasses = 32 / kSortDigitBits;
+        static_assert(kSortBuckets == kSortGroupSize,
+                      "SplatSortScanTotals scans every digit's total in one group");
+
+        // Mirrors SortConstants in SplatSort.hlsli.
+        struct SortConstants
+        {
+            std::uint32_t count;
+            std::uint32_t splatCount;
+            std::uint32_t tileCount;
+            std::uint32_t shift;
+            std::uint32_t sourceIsB;
+            std::uint32_t padding[3];
+        };
+        static_assert(sizeof(SortConstants) == 32);
+
+        // Both halves of the key and value ping-pong, the per-tile histograms
+        // and the digit bases.
+        constexpr std::uint32_t kSortBufferCount = 6;
+
+        // Orders every preceding access against every following one. The sort
+        // stages each read what the one before wrote, across six buffers, which
+        // is exactly what one memory barrier says in one line.
+        void memoryBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 srcStage,
+                           VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
+                           VkAccessFlags2 dstAccess)
+        {
+            VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+            barrier.srcStageMask = srcStage;
+            barrier.srcAccessMask = srcAccess;
+            barrier.dstStageMask = dstStage;
+            barrier.dstAccessMask = dstAccess;
+
+            VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+            dependency.memoryBarrierCount = 1;
+            dependency.pMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(commandBuffer, &dependency);
+        }
+
         VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment)
         {
             return alignment == 0 ? value : (value + alignment - 1) & ~(alignment - 1);
@@ -176,6 +223,7 @@ namespace r4d::vulkan
         R4D_TRY(createPipeline(shaderDirectory));
         R4D_TRY(createShadowPipeline(shaderDirectory));
         R4D_TRY(createSplatPipeline(shaderDirectory));
+        R4D_TRY(createSortPipelines(shaderDirectory));
 
         if (!m_headless)
         {
@@ -1371,10 +1419,25 @@ namespace r4d::vulkan
             m_splatDescriptorPool = VK_NULL_HANDLE;
             m_splatSets = {};
         }
+        if (m_sortDescriptorPool != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorPool(m_context.device, m_sortDescriptorPool, nullptr);
+            m_sortDescriptorPool = VK_NULL_HANDLE;
+            m_sortSets = {};
+        }
         destroyBuffer(m_gaussianBuffer);
+        destroyBuffer(m_sortConstants);
         for (Buffer& order : m_gaussianOrder)
         {
             destroyBuffer(order);
+        }
+        for (SortBuffers& sort : m_sortBuffers)
+        {
+            destroyBuffer(sort.keysA);
+            destroyBuffer(sort.keysB);
+            destroyBuffer(sort.valuesB);
+            destroyBuffer(sort.histogram);
+            destroyBuffer(sort.digitBase);
         }
     }
 
@@ -1382,10 +1445,9 @@ namespace r4d::vulkan
     {
         waitForGpuIdle();
         destroySplatBuffers();
-        m_gaussianPositions.clear();
-        m_gaussianSorted.clear();
-        m_gaussianDepths.clear();
         m_gaussianCount = 0;
+        m_sortTileCount = 0;
+        m_sortPaddedCount = 0;
 
         if (cloud.empty())
         {
@@ -1430,7 +1492,10 @@ namespace r4d::vulkan
         VkBufferMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
         barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
         barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+        // The sort reads the positions out of the same buffer the vertex
+        // shader rasterises from, so both stages are in the sync scope.
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                               VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -1445,37 +1510,275 @@ namespace r4d::vulkan
         R4D_TRY(endOneShot(m_uploadPool, commandBuffer.value()));
         destroyBuffer(staging.value());
 
-        // The depth order is rewritten every frame, so it stays in host memory
-        // the shader reads directly, one buffer per frame in flight.
-        for (Buffer& order : m_gaussianOrder)
-        {
-            auto buffer = createBuffer(static_cast<VkDeviceSize>(count) *
-                                           sizeof(std::uint32_t),
+        // Every kernel but the key build runs without a bounds check, so the
+        // sort buffers hold a whole number of tiles and the key build fills the
+        // tail with the largest possible key.
+        m_sortTileCount = (count + kSortGroupSize - 1) / kSortGroupSize;
+        m_sortPaddedCount = m_sortTileCount * kSortGroupSize;
+
+        // Digit-major, one row of per-tile counts per digit.
+        const VkDeviceSize histogramEntries =
+            static_cast<VkDeviceSize>(kSortBuckets) * m_sortTileCount;
+
+        const auto createSortBuffer = [&](VkDeviceSize entries, const char* name,
+                                          Buffer& out) -> Status {
+            auto buffer = createBuffer(entries * sizeof(std::uint32_t),
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                       "gaussian order");
+                                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, name);
             if (!buffer)
             {
                 return buffer.error();
             }
-            order = buffer.value();
+            out = buffer.value();
+            return Status::Ok();
+        };
+
+        for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
+        {
+            SortBuffers& sort = m_sortBuffers[i];
+            // The order the vertex shader reads is the sort's values-A buffer:
+            // with an even number of passes the result lands back in it.
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, "gaussian order",
+                                     m_gaussianOrder[i]));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort keys A", sort.keysA));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort keys B", sort.keysB));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort values B",
+                                     sort.valuesB));
+            R4D_TRY(createSortBuffer(histogramEntries, "splat sort histogram",
+                                     sort.histogram));
+            R4D_TRY(createSortBuffer(kSortBuckets, "splat sort digit bases",
+                                     sort.digitBase));
         }
 
-        m_gaussianPositions.reserve(count);
-        for (const Gaussian& g : cloud.gaussians)
+        // A pass's constants never change once the count is known, so the whole
+        // ping-pong schedule is written here and picked out by dynamic offset.
+        m_sortConstantStride =
+            alignUp(sizeof(SortConstants),
+                    m_context.properties.limits.minUniformBufferOffsetAlignment);
+        auto sortConstants = createBuffer(m_sortConstantStride * kSortPasses,
+                                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                          "splat sort constants");
+        if (!sortConstants)
         {
-            m_gaussianPositions.push_back(g.position);
+            return sortConstants.error();
         }
-        m_gaussianSorted.resize(count);
-        m_gaussianDepths.resize(count);
+        m_sortConstants = sortConstants.value();
+
+        for (std::uint32_t pass = 0; pass < kSortPasses; ++pass)
+        {
+            SortConstants constants{};
+            constants.count = m_sortPaddedCount;
+            constants.splatCount = count;
+            constants.tileCount = m_sortTileCount;
+            constants.shift = pass * kSortDigitBits;
+            // Pass 0 reads A, and an even pass count brings the result home.
+            constants.sourceIsB = pass & 1u;
+            std::memcpy(static_cast<std::byte*>(m_sortConstants.mapped) +
+                            pass * m_sortConstantStride,
+                        &constants, sizeof(constants));
+        }
+
         m_gaussianCount = count;
 
         R4D_TRY(createSplatDescriptors());
+        R4D_TRY(createSortDescriptors());
 
-        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB)", count,
-                 static_cast<double>(splatBytes) / (1024.0 * 1024.0));
+        const double sortMiB = static_cast<double>(kFramesInFlight) *
+                               static_cast<double>(4 * m_sortPaddedCount +
+                                                   histogramEntries + kSortBuckets) *
+                               sizeof(std::uint32_t) / (1024.0 * 1024.0);
+        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB), sorted on the GPU in {} "
+                 "tiles ({:.1f} MiB of sort buffers)",
+                 count, static_cast<double>(splatBytes) / (1024.0 * 1024.0),
+                 m_sortTileCount, sortMiB);
         return Status::Ok();
+    }
+
+    Status VulkanRenderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
+    {
+        // Binding numbers come from the register shifts the shaders are built
+        // with, the same way the splat pass gets its t0 and t1.
+        std::vector<VkDescriptorSetLayoutBinding> bindings;
+        bindings.push_back({0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1,
+                            VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
+        bindings.push_back({kSortConstantsBinding,
+                            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1,
+                            VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
+        bindings.push_back({kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                            VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
+        for (std::uint32_t i = 0; i < kSortBufferCount; ++i)
+        {
+            bindings.push_back({kSortBufferBinding + i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
+        }
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        layoutInfo.bindingCount = static_cast<std::uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+        R4D_VK(vkCreateDescriptorSetLayout(m_context.device, &layoutInfo, nullptr,
+                                           &m_sortSetLayout),
+               "vkCreateDescriptorSetLayout (splat sort)");
+
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{
+            VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &m_sortSetLayout;
+        R4D_VK(vkCreatePipelineLayout(m_context.device, &pipelineLayoutInfo, nullptr,
+                                      &m_sortPipelineLayout),
+               "vkCreatePipelineLayout (splat sort)");
+
+        // Indexed by SortStage, so the order of these must match the enum.
+        static constexpr std::string_view kStageShaders[] = {
+            "SplatSortKey.cs.spv", "SplatSortHistogram.cs.spv",
+            "SplatSortScanRows.cs.spv", "SplatSortScanTotals.cs.spv",
+            "SplatSortScatter.cs.spv"};
+        static_assert(std::size(kStageShaders) ==
+                      static_cast<std::size_t>(SortStage::Count));
+
+        for (std::size_t i = 0; i < std::size(kStageShaders); ++i)
+        {
+            auto shaderModule = loadShaderModule(shaderDirectory, kStageShaders[i]);
+            if (!shaderModule)
+            {
+                return shaderModule.error();
+            }
+
+            VkComputePipelineCreateInfo info{
+                VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+            info.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+            info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+            info.stage.module = shaderModule.value();
+            info.stage.pName = "main";
+            info.layout = m_sortPipelineLayout;
+
+            const VkResult result =
+                vkCreateComputePipelines(m_context.device, VK_NULL_HANDLE, 1, &info,
+                                         nullptr, &m_sortPipelines[i]);
+            vkDestroyShaderModule(m_context.device, shaderModule.value(), nullptr);
+            R4D_VK(result, "vkCreateComputePipelines (splat sort)");
+        }
+
+        return Status::Ok();
+    }
+
+    Status VulkanRenderer::createSortDescriptors()
+    {
+        const VkDescriptorPoolSize sizes[] = {
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, kFramesInFlight * 2},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight * (kSortBufferCount + 1)},
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        poolInfo.maxSets = kFramesInFlight;
+        poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
+        poolInfo.pPoolSizes = sizes;
+        R4D_VK(vkCreateDescriptorPool(m_context.device, &poolInfo, nullptr,
+                                      &m_sortDescriptorPool),
+               "vkCreateDescriptorPool (splat sort)");
+
+        const std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{m_sortSetLayout,
+                                                                         m_sortSetLayout};
+        VkDescriptorSetAllocateInfo allocInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        allocInfo.descriptorPool = m_sortDescriptorPool;
+        allocInfo.descriptorSetCount = kFramesInFlight;
+        allocInfo.pSetLayouts = layouts.data();
+        R4D_VK(vkAllocateDescriptorSets(m_context.device, &allocInfo, m_sortSets.data()),
+               "vkAllocateDescriptorSets (splat sort)");
+
+        for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
+        {
+            const SortBuffers& sort = m_sortBuffers[i];
+            // Must match the u0..u5 order in SplatSort.hlsli.
+            const Buffer* const sortBuffers[kSortBufferCount] = {
+                &sort.keysA,   &sort.keysB,     &m_gaussianOrder[i],
+                &sort.valuesB, &sort.histogram, &sort.digitBase};
+
+            VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0,
+                                             sizeof(FrameConstants)};
+            VkDescriptorBufferInfo constantsInfo{m_sortConstants.handle, 0,
+                                                 sizeof(SortConstants)};
+            VkDescriptorBufferInfo gaussianInfo{m_gaussianBuffer.handle, 0, VK_WHOLE_SIZE};
+            std::array<VkDescriptorBufferInfo, kSortBufferCount> bufferInfos{};
+
+            std::vector<VkWriteDescriptorSet> writes;
+            const auto write = [&](std::uint32_t binding, VkDescriptorType type,
+                                   const VkDescriptorBufferInfo* buffer) {
+                VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                entry.dstSet = m_sortSets[i];
+                entry.dstBinding = binding;
+                entry.descriptorCount = 1;
+                entry.descriptorType = type;
+                entry.pBufferInfo = buffer;
+                writes.push_back(entry);
+            };
+
+            write(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &frameInfo);
+            write(kSortConstantsBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                  &constantsInfo);
+            write(kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &gaussianInfo);
+            for (std::uint32_t b = 0; b < kSortBufferCount; ++b)
+            {
+                bufferInfos[b] = {sortBuffers[b]->handle, 0, VK_WHOLE_SIZE};
+                write(kSortBufferBinding + b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                      &bufferInfos[b]);
+            }
+
+            vkUpdateDescriptorSets(m_context.device,
+                                   static_cast<std::uint32_t>(writes.size()),
+                                   writes.data(), 0, nullptr);
+        }
+
+        return Status::Ok();
+    }
+
+    void VulkanRenderer::sortSplats(VkCommandBuffer commandBuffer,
+                                    std::uint32_t frameIndex)
+    {
+        if (m_gaussianCount == 0 || m_sortPipelineLayout == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        // This slot's buffers were last touched two frames ago and renderFrame
+        // has already waited on that frame's fence, so nothing here needs a
+        // barrier against the previous frame's reads.
+        const auto dispatch = [&](SortStage stage, std::uint32_t pass,
+                                  std::uint32_t groups) {
+            const std::uint32_t offsets[] = {
+                static_cast<std::uint32_t>(frameIndex * m_frameStride),
+                static_cast<std::uint32_t>(pass * m_sortConstantStride)};
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              m_sortPipelines[static_cast<std::size_t>(stage)]);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                    m_sortPipelineLayout, 0, 1, &m_sortSets[frameIndex],
+                                    static_cast<std::uint32_t>(std::size(offsets)),
+                                    offsets);
+            vkCmdDispatch(commandBuffer, groups, 1, 1);
+            memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        };
+
+        dispatch(SortStage::Key, 0, m_sortTileCount);
+        for (std::uint32_t pass = 0; pass < kSortPasses; ++pass)
+        {
+            dispatch(SortStage::Histogram, pass, m_sortTileCount);
+            dispatch(SortStage::ScanRows, pass, kSortBuckets);
+            dispatch(SortStage::ScanTotals, pass, 1);
+            dispatch(SortStage::Scatter, pass, m_sortTileCount);
+        }
+
+        // The order buffer is read by the vertex shader for the rest of the frame.
+        memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     }
 
     Status VulkanRenderer::createSplatDescriptors()
@@ -1541,23 +1844,7 @@ namespace r4d::vulkan
         }
 
         // Alpha compositing is order-dependent, so the splats go far to near.
-        // The same full CPU sort as the D3D12 backend, which is what keeps the
-        // two comparable pixel for pixel.
-        const Mat4& view = m_camera.view;
-        for (std::uint32_t i = 0; i < m_gaussianCount; ++i)
-        {
-            const Vec3& p = m_gaussianPositions[i];
-            m_gaussianDepths[i] =
-                view[0][2] * p.x + view[1][2] * p.y + view[2][2] * p.z + view[3][2];
-            m_gaussianSorted[i] = i;
-        }
-        std::sort(m_gaussianSorted.begin(), m_gaussianSorted.end(),
-                  [this](std::uint32_t a, std::uint32_t b) {
-                      return m_gaussianDepths[a] > m_gaussianDepths[b];
-                  });
-        std::memcpy(m_gaussianOrder[frameIndex].mapped, m_gaussianSorted.data(),
-                    m_gaussianCount * sizeof(std::uint32_t));
-
+        // sortSplats produced that order on the GPU earlier in this frame.
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_splatPipeline);
         const std::uint32_t offset = static_cast<std::uint32_t>(frameIndex * m_frameStride);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1953,6 +2240,10 @@ namespace r4d::vulkan
                                  m_timestampPool, frameIndex * 2);
         }
 
+        // Before anything opens a render pass: the splat order for this frame
+        // is produced by compute, and the vertex shader reads it further down.
+        sortSplats(frame.commandBuffer, frameIndex);
+
         renderShadowPass(frame.commandBuffer);
 
         VkImage colourImage = currentColourImage();
@@ -2295,6 +2586,21 @@ namespace r4d::vulkan
             if (m_splatSetLayout != VK_NULL_HANDLE)
             {
                 vkDestroyDescriptorSetLayout(m_context.device, m_splatSetLayout, nullptr);
+            }
+            for (VkPipeline pipeline : m_sortPipelines)
+            {
+                if (pipeline != VK_NULL_HANDLE)
+                {
+                    vkDestroyPipeline(m_context.device, pipeline, nullptr);
+                }
+            }
+            if (m_sortPipelineLayout != VK_NULL_HANDLE)
+            {
+                vkDestroyPipelineLayout(m_context.device, m_sortPipelineLayout, nullptr);
+            }
+            if (m_sortSetLayout != VK_NULL_HANDLE)
+            {
+                vkDestroyDescriptorSetLayout(m_context.device, m_sortSetLayout, nullptr);
             }
             if (m_timestampPool != VK_NULL_HANDLE)
             {

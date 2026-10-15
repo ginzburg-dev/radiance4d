@@ -66,6 +66,7 @@ if(R4D_ENABLE_VULKAN)
         R4D_ENABLE_VULKAN=1
         R4D_VK_T_SHIFT=${R4D_VK_T_SHIFT}
         R4D_VK_S_SHIFT=${R4D_VK_S_SHIFT}
+        R4D_VK_U_SHIFT=${R4D_VK_U_SHIFT}
     )
 endif()
 

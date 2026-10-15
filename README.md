@@ -115,12 +115,25 @@ Current limits: one draw call per cloud with no visibility culling or tiled binn
 every frame, and 240 bytes of attributes per splat (degree-3 SH is 192 of them), which is 240 MB for
 a million-splat scene.
 
-Framing a real scene is also still crude. The viewer points the camera at the cloud's bounding
-sphere, and reconstruction leaves sparse low-opacity splats far outside the subject — in `train`,
-x spans about 149 units while its interquartile range is about 4 — so the bounding radius is
-dominated by outliers and the subject lands in a few percent of the frame. A robust framing that
-ignores the tail is needed before `--splat-ply` gives a presentable image, and that is why there is
-no dataset screenshot here yet.
+A splat cloud is no longer framed on its bounding sphere. A reconstruction leaves sparse
+low-opacity splats far outside the subject, so that sphere is dominated by outliers: in `train` it
+has radius 145 about a centre 35 units from the scene, and the camera ended up 326 units back with
+the subject a few percent of the frame. The cloud now also carries a framing sphere — the per-axis
+median position, and the distance half the splats are within — which `train` puts at radius 2.4 and
+the camera 5.5 back. The full bounds are unchanged and still carry culling, the near and far planes
+and the merge with a mesh's bounds; mesh scenes still frame exactly as before.
+
+The dataset's own capture poses say that is the right place to stand: the 301 cameras in `train`'s
+`cameras.json` sit a median 3.42 and at most 7.35 units from the scene centre, and the median splat
+position lands 0.07 units from the median of those camera positions.
+
+There is still no dataset screenshot here, for two reasons that framing does not reach. The
+projection's Jacobian is not clamped to the frustum the way the reference implementation clamps it,
+so once the camera is close enough to be inside the reconstruction, off-axis splats acquire a
+covariance that smears them across the whole frame and the capture is a white wash; that is a
+projection defect, measured and written up, not a framing one. And the orbit camera always starts
+at yaw 0, which for `train` looks into foliage. With both addressed the scene does resolve — two
+locomotives, lettering, ballast and the hillside behind — but neither is fixed on `main` yet.
 
 ## Measurements
 

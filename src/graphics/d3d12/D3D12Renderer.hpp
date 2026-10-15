@@ -82,6 +82,7 @@ namespace r4d::d3d12
         Status createFrameResources();
         Status createPipeline(const std::filesystem::path& shaderDirectory);
         Status uploadModel(const Model& model) override;
+        Status uploadGaussians(const GaussianCloud& cloud) override;
         Status uploadTextures(const Model& model);
         Result<ComPtr<ID3D12Resource>> createTexture(const ImageRgba8& image, bool srgb,
                                                      ID3D12GraphicsCommandList7* commandList,
@@ -94,6 +95,9 @@ namespace r4d::d3d12
         Status createDepthBuffer(UVec2 size);
         Status createShadowMap();
         Status createShadowPipeline(const std::filesystem::path& shaderDirectory);
+        Status createSplatPipeline(const std::filesystem::path& shaderDirectory);
+        void renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
+                          std::uint32_t& triangles);
         void renderShadowPass();
         Mat4 lightViewProjection() const;
         Status initialiseUi(void* windowHandle);
@@ -147,6 +151,17 @@ namespace r4d::d3d12
         D3D12_INDEX_BUFFER_VIEW m_indexBufferView{};
         std::vector<Primitive> m_primitives;
         std::vector<Material> m_materials;
+
+        ComPtr<ID3D12RootSignature> m_splatRootSignature;
+        ComPtr<ID3D12PipelineState> m_splatPipeline;
+        ComPtr<ID3D12Resource> m_gaussianBuffer;
+        // One per frame in flight: the depth order is rewritten every frame.
+        std::array<ComPtr<ID3D12Resource>, kFramesInFlight> m_gaussianOrder{};
+        std::array<std::uint32_t*, kFramesInFlight> m_gaussianOrderCpu{};
+        std::vector<Vec3> m_gaussianPositions;
+        std::vector<std::uint32_t> m_gaussianSorted;
+        std::vector<float> m_gaussianDepths;
+        std::uint32_t m_gaussianCount = 0;
 
         ComPtr<ID3D12Resource> m_offscreenTarget;
         ComPtr<ID3D12Resource> m_captureReadback;

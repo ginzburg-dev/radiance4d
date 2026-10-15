@@ -12,6 +12,7 @@
 #include <radiance4d/graphics/GpuCapabilities.hpp>
 #include <radiance4d/graphics/GpuStats.hpp>
 #include <radiance4d/graphics/RenderSettings.hpp>
+#include <radiance4d/scene/GaussianCloud.hpp>
 #include <radiance4d/scene/Model.hpp>
 
 #include <functional>
@@ -61,6 +62,9 @@ namespace r4d
 
         // Replaces the geometry; waits for the GPU before releasing the old buffers.
         virtual Status uploadModel(const Model& model) = 0;
+
+        // Replaces the splat set. An empty cloud clears it.
+        virtual Status uploadGaussians(const GaussianCloud& cloud) = 0;
 
         virtual void setCamera(const CameraParams& camera) = 0;
         virtual void setRenderSettings(const RenderSettings& settings) = 0;

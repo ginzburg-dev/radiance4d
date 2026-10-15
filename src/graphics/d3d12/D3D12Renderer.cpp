@@ -7,6 +7,7 @@
 #include <imgui_impl_dx12.h>
 #include <imgui_impl_win32.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace r4d::d3d12
@@ -27,12 +28,17 @@ namespace r4d::d3d12
         {
             Mat4 viewProjection;
             Mat4 lightViewProjection;
+            Mat4 view;
             Vec3 cameraPosition;
             float timeSeconds;
             Vec3 ambient;
             float exposure;
             float shadowTexelSize;
             float shadowPadding[3];
+            Vec2 splatViewport;
+            Vec2 splatFocal;
+            float splatNearPlane;
+            float splatPadding[3];
             Light lights[kLightCount];
         };
 
@@ -54,6 +60,9 @@ namespace r4d::d3d12
         constexpr UINT kMaterialRootConstants = sizeof(MaterialConstants) / sizeof(UINT32);
 
         constexpr UINT64 kConstantBufferAlignment = 256;
+
+        // Closer than this the Jacobian is meaningless, so the splat is dropped.
+        constexpr float kSplatNearPlane = 0.05f;
 
         // Must match the optimised clear value the render target is created with.
         constexpr float kClearColour[4] = {0.043f, 0.047f, 0.063f, 1.0f};
@@ -215,6 +224,10 @@ namespace r4d::d3d12
         m_textures.clear();
         m_srvHeap.Reset();
         m_shadowPipeline.Reset();
+        m_splatPipeline.Reset();
+        m_splatRootSignature.Reset();
+        m_gaussianBuffer.Reset();
+        m_gaussianOrder = {};
         m_shadowMap.Reset();
         m_depthBuffer.Reset();
         m_dsvHeap.Reset();
@@ -293,6 +306,7 @@ namespace r4d::d3d12
 
         R4D_TRY(createPipeline(shaderDirectory));
         R4D_TRY(createShadowPipeline(shaderDirectory));
+        R4D_TRY(createSplatPipeline(shaderDirectory));
 
         if (!m_headless)
         {
@@ -1396,6 +1410,256 @@ namespace r4d::d3d12
         return Status::Ok();
     }
 
+    Status D3D12Renderer::uploadGaussians(const GaussianCloud& cloud)
+    {
+        waitForGpuIdle();
+        m_gaussianBuffer.Reset();
+        m_gaussianOrder = {};
+        m_gaussianOrderCpu = {};
+        m_gaussianPositions.clear();
+        m_gaussianSorted.clear();
+        m_gaussianDepths.clear();
+        m_gaussianCount = 0;
+
+        if (cloud.empty())
+        {
+            return Status::Ok();
+        }
+
+        const auto count = static_cast<std::uint32_t>(cloud.count());
+        const UINT64 splatBytes = static_cast<UINT64>(count) * sizeof(Gaussian);
+
+        const auto defaultHeap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+        const auto uploadHeap = heapProperties(D3D12_HEAP_TYPE_UPLOAD);
+        const auto splatDesc = bufferDesc(splatBytes);
+
+        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &splatDesc, D3D12_RESOURCE_STATE_COMMON,
+                                                 nullptr, IID_PPV_ARGS(&m_gaussianBuffer)),
+               "CreateCommittedResource (gaussian buffer)");
+        m_gaussianBuffer->SetName(L"Radiance4D Gaussian Buffer");
+
+        ComPtr<ID3D12Resource> upload;
+        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &splatDesc,
+                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                 IID_PPV_ARGS(&upload)),
+               "CreateCommittedResource (gaussian upload)");
+        {
+            void* mapped = nullptr;
+            const D3D12_RANGE noRead{0, 0};
+            R4D_HR(upload->Map(0, &noRead, &mapped), "Map (gaussian upload)");
+            std::memcpy(mapped, cloud.gaussians.data(),
+                        static_cast<std::size_t>(splatBytes));
+            upload->Unmap(0, nullptr);
+        }
+
+        // The depth order is rewritten every frame, so it stays in host memory
+        // the shader reads directly, one buffer per frame in flight.
+        const auto orderDesc =
+            bufferDesc(static_cast<UINT64>(count) * sizeof(std::uint32_t));
+        for (UINT i = 0; i < kFramesInFlight; ++i)
+        {
+            R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
+                                                     &orderDesc,
+                                                     D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                     nullptr,
+                                                     IID_PPV_ARGS(&m_gaussianOrder[i])),
+                   "CreateCommittedResource (gaussian order)");
+            m_gaussianOrder[i]->SetName(L"Radiance4D Gaussian Order");
+
+            void* mapped = nullptr;
+            const D3D12_RANGE noRead{0, 0};
+            R4D_HR(m_gaussianOrder[i]->Map(0, &noRead, &mapped), "Map (gaussian order)");
+            m_gaussianOrderCpu[i] = static_cast<std::uint32_t*>(mapped);
+        }
+
+        auto& frame = m_frames[0];
+        R4D_HR(frame.commandAllocator->Reset(), "Reset (gaussian upload allocator)");
+        R4D_HR(m_commandList->Reset(frame.commandAllocator.Get(), nullptr),
+               "Reset (gaussian upload command list)");
+        m_commandList->CopyBufferRegion(m_gaussianBuffer.Get(), 0, upload.Get(), 0,
+                                        splatBytes);
+
+        D3D12_BUFFER_BARRIER barrier{};
+        barrier.SyncBefore = D3D12_BARRIER_SYNC_COPY;
+        barrier.SyncAfter = D3D12_BARRIER_SYNC_VERTEX_SHADING;
+        barrier.AccessBefore = D3D12_BARRIER_ACCESS_COPY_DEST;
+        barrier.AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+        barrier.pResource = m_gaussianBuffer.Get();
+        barrier.Offset = 0;
+        barrier.Size = UINT64_MAX;
+
+        D3D12_BARRIER_GROUP group{};
+        group.Type = D3D12_BARRIER_TYPE_BUFFER;
+        group.NumBarriers = 1;
+        group.pBufferBarriers = &barrier;
+        m_commandList->Barrier(1, &group);
+
+        R4D_HR(m_commandList->Close(), "Close (gaussian upload command list)");
+        ID3D12CommandList* lists[] = {m_commandList.Get()};
+        m_queue->ExecuteCommandLists(1, lists);
+
+        const UINT64 uploadFence = m_nextFenceValue++;
+        R4D_HR(m_queue->Signal(m_fence.Get(), uploadFence), "Signal (gaussian fence)");
+        R4D_TRY(waitForFenceValue(uploadFence));
+        frame.fenceValue = uploadFence;
+
+        m_gaussianPositions.reserve(count);
+        for (const Gaussian& g : cloud.gaussians)
+        {
+            m_gaussianPositions.push_back(g.position);
+        }
+        m_gaussianSorted.resize(count);
+        m_gaussianDepths.resize(count);
+        m_gaussianCount = count;
+
+        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB)", count,
+                 static_cast<double>(splatBytes) / (1024.0 * 1024.0));
+        return Status::Ok();
+    }
+
+    void D3D12Renderer::renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
+                                     std::uint32_t& triangles)
+    {
+        if (m_gaussianCount == 0 || !m_splatPipeline)
+        {
+            return;
+        }
+
+        // Alpha compositing is order-dependent, so the splats go far to near.
+        // A full CPU sort every frame; a GPU radix sort replaces it once the
+        // counts justify one.
+        const Mat4& view = m_camera.view;
+        for (std::uint32_t i = 0; i < m_gaussianCount; ++i)
+        {
+            const Vec3& p = m_gaussianPositions[i];
+            m_gaussianDepths[i] =
+                view[0][2] * p.x + view[1][2] * p.y + view[2][2] * p.z + view[3][2];
+            m_gaussianSorted[i] = i;
+        }
+        std::sort(m_gaussianSorted.begin(), m_gaussianSorted.end(),
+                  [this](std::uint32_t a, std::uint32_t b) {
+                      return m_gaussianDepths[a] > m_gaussianDepths[b];
+                  });
+        std::memcpy(m_gaussianOrderCpu[frameIndex], m_gaussianSorted.data(),
+                    m_gaussianCount * sizeof(std::uint32_t));
+
+        auto& frame = m_frames[frameIndex];
+        m_commandList->SetPipelineState(m_splatPipeline.Get());
+        m_commandList->SetGraphicsRootSignature(m_splatRootSignature.Get());
+        m_commandList->SetGraphicsRootConstantBufferView(
+            0, frame.constantBuffer->GetGPUVirtualAddress());
+        m_commandList->SetGraphicsRootShaderResourceView(
+            1, m_gaussianBuffer->GetGPUVirtualAddress());
+        m_commandList->SetGraphicsRootShaderResourceView(
+            2, m_gaussianOrder[frameIndex]->GetGPUVirtualAddress());
+        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        m_commandList->DrawInstanced(4, m_gaussianCount, 0, 0);
+
+        ++drawCalls;
+        triangles += m_gaussianCount * 2;
+    }
+
+    Status D3D12Renderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
+    {
+        auto vertexShader = loadShaderBlob(shaderDirectory, "Splat.vs.dxil");
+        if (!vertexShader)
+        {
+            return vertexShader.error();
+        }
+        auto pixelShader = loadShaderBlob(shaderDirectory, "Splat.ps.dxil");
+        if (!pixelShader)
+        {
+            return pixelShader.error();
+        }
+
+        // Buffers only, so root descriptors are enough: no heap, no table.
+        D3D12_ROOT_PARAMETER1 rootParameters[3]{};
+        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParameters[0].Descriptor.ShaderRegister = 0;
+        rootParameters[0].Descriptor.Flags =
+            D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+
+        for (UINT i = 0; i < 2; ++i)
+        {
+            D3D12_ROOT_PARAMETER1& parameter = rootParameters[1 + i];
+            parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+            parameter.Descriptor.ShaderRegister = i;
+            parameter.Descriptor.Flags =
+                D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+        }
+
+        D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
+        rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
+        rootDesc.Desc_1_1.NumParameters = static_cast<UINT>(std::size(rootParameters));
+        rootDesc.Desc_1_1.pParameters = rootParameters;
+        rootDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+        ComPtr<ID3DBlob> serialised;
+        ComPtr<ID3DBlob> rootError;
+        const HRESULT hr = ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised,
+                                                                  &rootError);
+        if (FAILED(hr))
+        {
+            const char* detail = rootError
+                                     ? static_cast<const char*>(rootError->GetBufferPointer())
+                                     : "(no detail)";
+            return hresultError(ErrorCode::ApiCallFailed, hr,
+                                std::format("SerializeVersionedRootSignature (splat): {}",
+                                            detail));
+        }
+
+        R4D_HR(m_device->CreateRootSignature(0, serialised->GetBufferPointer(),
+                                             serialised->GetBufferSize(),
+                                             IID_PPV_ARGS(&m_splatRootSignature)),
+               "CreateRootSignature (splat)");
+        m_splatRootSignature->SetName(L"Radiance4D Splat Root Signature");
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+        psoDesc.pRootSignature = m_splatRootSignature.Get();
+        psoDesc.VS.pShaderBytecode = vertexShader.value().data();
+        psoDesc.VS.BytecodeLength = vertexShader.value().size();
+        psoDesc.PS.pShaderBytecode = pixelShader.value().data();
+        psoDesc.PS.BytecodeLength = pixelShader.value().size();
+
+        // Premultiplied alpha, which is what the pixel shader emits.
+        D3D12_RENDER_TARGET_BLEND_DESC& blend = psoDesc.BlendState.RenderTarget[0];
+        blend.BlendEnable = TRUE;
+        blend.SrcBlend = D3D12_BLEND_ONE;
+        blend.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+        blend.BlendOp = D3D12_BLEND_OP_ADD;
+        blend.SrcBlendAlpha = D3D12_BLEND_ONE;
+        blend.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+        blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+        psoDesc.SampleMask = UINT_MAX;
+        psoDesc.RasterizerState = defaultRasterizerDesc();
+        // The quad comes from SV_VertexID, so its winding is not fixed.
+        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        // Tested against the mesh depth, never written: the splats order
+        // themselves by the draw order instead.
+        psoDesc.DepthStencilState.DepthEnable = TRUE;
+        psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        psoDesc.DepthStencilState.StencilEnable = FALSE;
+        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        psoDesc.NumRenderTargets = 1;
+        psoDesc.RTVFormats[0] = kBackBufferFormat;
+        psoDesc.DSVFormat = kDepthFormat;
+        psoDesc.SampleDesc.Count = 1;
+        psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+
+        R4D_HR(m_device->CreateGraphicsPipelineState(&psoDesc,
+                                                     IID_PPV_ARGS(&m_splatPipeline)),
+               "CreateGraphicsPipelineState (splat)");
+        m_splatPipeline->SetName(L"Radiance4D Splat PSO");
+        return Status::Ok();
+    }
+
     Status D3D12Renderer::waitForFenceValue(UINT64 value)
     {
         if (m_fence->GetCompletedValue() >= value)
@@ -1482,6 +1746,15 @@ namespace r4d::d3d12
             FrameConstants constants{};
             constants.viewProjection = m_camera.projection * m_camera.view;
             constants.lightViewProjection = lightViewProjection();
+            constants.view = m_camera.view;
+            constants.splatViewport = Vec2{static_cast<float>(m_size.x),
+                                           static_cast<float>(m_size.y)};
+            // Focal length in pixels, recovered from the projection, which is
+            // what the covariance Jacobian needs.
+            constants.splatFocal =
+                Vec2{0.5f * static_cast<float>(m_size.x) * m_camera.projection[0][0],
+                     0.5f * static_cast<float>(m_size.y) * m_camera.projection[1][1]};
+            constants.splatNearPlane = kSplatNearPlane;
             constants.shadowTexelSize = 1.0f / static_cast<float>(kShadowMapSize);
             constants.cameraPosition = m_camera.position;
             constants.timeSeconds = timeSeconds;
@@ -1599,6 +1872,8 @@ namespace r4d::d3d12
             ++drawCalls;
             triangles += primitive.indexCount / 3;
         }
+
+        renderSplats(frameIndex, drawCalls, triangles);
 
         renderUi();
 

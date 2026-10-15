@@ -16,6 +16,8 @@
 #endif
 
 #include <algorithm>
+#include <cstdlib>
+#include <map>
 #include <cstring>
 #include <format>
 
@@ -43,6 +45,73 @@ namespace r4d
                 case cgltf_result_io_error:        return "io error";
                 default:                           return "failed";
             }
+        }
+
+        // Resolves a glTF image to pixels: buffer view, data URI or a file
+        // beside the document.
+        std::int32_t loadTexture(Model& model, const cgltf_texture* texture,
+                                 const std::filesystem::path& baseDirectory, bool srgb,
+                                 std::map<const cgltf_image*, std::int32_t>& cache)
+        {
+            if (texture == nullptr || texture->image == nullptr)
+            {
+                return -1;
+            }
+            const cgltf_image* image = texture->image;
+            if (const auto found = cache.find(image); found != cache.end())
+            {
+                return found->second;
+            }
+
+            Result<ImageRgba8> decoded = makeError(ErrorCode::NotFound, "no image source");
+
+            if (image->buffer_view != nullptr && image->buffer_view->buffer != nullptr &&
+                image->buffer_view->buffer->data != nullptr)
+            {
+                const auto* bytes = static_cast<const std::byte*>(
+                    image->buffer_view->buffer->data);
+                decoded = decodeImage(bytes + image->buffer_view->offset,
+                                      image->buffer_view->size);
+            }
+            else if (image->uri != nullptr)
+            {
+                const std::string uri = image->uri;
+                if (uri.rfind("data:", 0) == 0)
+                {
+                    const std::size_t comma = uri.find(',');
+                    if (comma != std::string::npos)
+                    {
+                        void* raw = nullptr;
+                        cgltf_options options{};
+                        const std::string payload = uri.substr(comma + 1);
+                        // Decoded size is at most 3/4 of the base64 text.
+                        const cgltf_size size = payload.size() / 4 * 3;
+                        if (cgltf_load_buffer_base64(&options, size, payload.c_str(), &raw) ==
+                                cgltf_result_success &&
+                            raw != nullptr)
+                        {
+                            decoded = decodeImage(static_cast<const std::byte*>(raw), size);
+                            free(raw);
+                        }
+                    }
+                }
+                else
+                {
+                    decoded = readPng(baseDirectory / uri);
+                }
+            }
+
+            if (!decoded)
+            {
+                R4D_WARN("glTF: cannot load texture: {}", decoded.error().message);
+                cache.emplace(image, -1);
+                return -1;
+            }
+
+            const auto index = static_cast<std::int32_t>(model.textures.size());
+            model.textures.push_back(TextureImage{std::move(decoded.value()), srgb});
+            cache.emplace(image, index);
+            return index;
         }
 
         void expandBounds(Bounds& bounds, Vec3 point, bool& first)
@@ -109,8 +178,15 @@ namespace r4d
         Model model;
         bool firstPoint = true;
 
-        model.materials.push_back(Material{"default", Vec4{0.8f, 0.8f, 0.8f, 1.0f},
-                                           Vec3{0.0f}, 0.0f, 0.6f});
+        Material fallback;
+        fallback.name = "default";
+        fallback.baseColour = Vec4{0.8f, 0.8f, 0.8f, 1.0f};
+        fallback.metallic = 0.0f;
+        fallback.roughness = 0.6f;
+        model.materials.push_back(fallback);
+
+        const std::filesystem::path baseDirectory = path.parent_path();
+        std::map<const cgltf_image*, std::int32_t> textureCache;
 
         for (cgltf_size i = 0; i < data->materials_count; ++i)
         {
@@ -125,6 +201,17 @@ namespace r4d
                 material.metallic = pbr.metallic_factor;
                 material.roughness = pbr.roughness_factor;
             }
+            if (source.has_pbr_metallic_roughness)
+            {
+                const auto& pbr = source.pbr_metallic_roughness;
+                material.baseColourTexture = loadTexture(
+                    model, pbr.base_color_texture.texture, baseDirectory, true, textureCache);
+                material.metallicRoughnessTexture =
+                    loadTexture(model, pbr.metallic_roughness_texture.texture, baseDirectory,
+                                false, textureCache);
+            }
+            material.normalTexture = loadTexture(model, source.normal_texture.texture,
+                                                 baseDirectory, false, textureCache);
             material.emissive = Vec3{source.emissive_factor[0], source.emissive_factor[1],
                                      source.emissive_factor[2]};
             model.materials.push_back(material);
@@ -255,9 +342,9 @@ namespace r4d
                              std::format("'{}' contains no triangle geometry", pathText));
         }
 
-        R4D_INFO("glTF: {} vertices, {} triangles, {} primitives, {} materials",
+        R4D_INFO("glTF: {} vertices, {} triangles, {} primitives, {} materials, {} textures",
                  model.vertices.size(), model.triangleCount(), model.primitives.size(),
-                 model.materials.size());
+                 model.materials.size(), model.textures.size());
         return model;
     }
 

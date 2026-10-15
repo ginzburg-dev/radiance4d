@@ -73,6 +73,10 @@ namespace r4d::d3d12
         Status createFrameResources();
         Status createPipeline(const std::filesystem::path& shaderDirectory);
         Status uploadModel(const Model& model) override;
+        Status uploadTextures(const Model& model);
+        Result<ComPtr<ID3D12Resource>> createTexture(const ImageRgba8& image, bool srgb,
+                                                     ID3D12GraphicsCommandList7* commandList,
+                                                     std::vector<ComPtr<ID3D12Resource>>& staging);
         Status createRtvHeap();
         Status acquireBackBuffers();
         void releaseBackBuffers();
@@ -97,6 +101,9 @@ namespace r4d::d3d12
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
         ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
         ComPtr<ID3D12Resource> m_depthBuffer;
+        ComPtr<ID3D12DescriptorHeap> m_srvHeap;
+        UINT m_srvDescriptorSize = 0;
+        std::vector<ComPtr<ID3D12Resource>> m_textures;
         UINT m_rtvDescriptorSize = 0;
         std::array<ComPtr<ID3D12Resource>, kBackBufferCount> m_backBuffers{};
 

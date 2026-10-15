@@ -86,4 +86,76 @@ namespace r4d
         return image;
     }
 
+    Result<ImageRgba8> decodeImage(const std::byte* data, std::size_t size)
+    {
+        if (data == nullptr || size == 0)
+        {
+            return makeError(ErrorCode::InvalidArgument, "decodeImage called with no data");
+        }
+
+        int width = 0;
+        int height = 0;
+        int channelsInFile = 0;
+        stbi_uc* pixels = ::stbi_load_from_memory(
+            reinterpret_cast<const stbi_uc*>(data), static_cast<int>(size), &width, &height,
+            &channelsInFile, 4);
+        if (pixels == nullptr)
+        {
+            const char* reason = ::stbi_failure_reason();
+            return makeError(ErrorCode::IoFailure,
+                             std::format("cannot decode image: {}",
+                                         reason != nullptr ? reason : "unknown"));
+        }
+
+        ImageRgba8 image;
+        image.width = static_cast<std::uint32_t>(width);
+        image.height = static_cast<std::uint32_t>(height);
+        image.rgba.assign(pixels, pixels + image.expectedBytes());
+        ::stbi_image_free(pixels);
+        return image;
+    }
+
+    std::vector<ImageRgba8> generateMipChain(const ImageRgba8& image)
+    {
+        std::vector<ImageRgba8> levels;
+        if (image.empty())
+        {
+            return levels;
+        }
+        levels.push_back(image);
+
+        while (levels.back().width > 1 || levels.back().height > 1)
+        {
+            const ImageRgba8& source = levels.back();
+            ImageRgba8 next;
+            next.width = source.width > 1 ? source.width / 2 : 1;
+            next.height = source.height > 1 ? source.height / 2 : 1;
+            next.rgba.resize(next.expectedBytes());
+
+            for (std::uint32_t y = 0; y < next.height; ++y)
+            {
+                for (std::uint32_t x = 0; x < next.width; ++x)
+                {
+                    const std::uint32_t sx = x * 2;
+                    const std::uint32_t sy = y * 2;
+                    const std::uint32_t sx1 = (sx + 1 < source.width) ? sx + 1 : sx;
+                    const std::uint32_t sy1 = (sy + 1 < source.height) ? sy + 1 : sy;
+
+                    for (std::size_t c = 0; c < 4; ++c)
+                    {
+                        const auto at = [&](std::uint32_t px, std::uint32_t py) {
+                            return static_cast<int>(
+                                source.rgba[(static_cast<std::size_t>(py) * source.width + px) * 4 + c]);
+                        };
+                        const int sum = at(sx, sy) + at(sx1, sy) + at(sx, sy1) + at(sx1, sy1);
+                        next.rgba[(static_cast<std::size_t>(y) * next.width + x) * 4 + c] =
+                            static_cast<std::uint8_t>((sum + 2) / 4);
+                    }
+                }
+            }
+            levels.push_back(std::move(next));
+        }
+        return levels;
+    }
+
 } // namespace r4d

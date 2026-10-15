@@ -1,6 +1,7 @@
 // Model.hpp
 #pragma once
 
+#include <radiance4d/core/ImageIO.hpp>
 #include <radiance4d/core/Math.hpp>
 #include <radiance4d/core/Result.hpp>
 
@@ -20,6 +21,12 @@ namespace r4d
         Vec2 uv{0.0f, 0.0f};
     };
 
+    struct TextureImage
+    {
+        ImageRgba8 image;
+        bool srgb = false;
+    };
+
     struct Material
     {
         std::string name;
@@ -27,6 +34,11 @@ namespace r4d
         Vec3 emissive{0.0f, 0.0f, 0.0f};
         float metallic = 1.0f;
         float roughness = 1.0f;
+
+        // Indices into Model::textures, or -1 for none.
+        std::int32_t baseColourTexture = -1;
+        std::int32_t metallicRoughnessTexture = -1;
+        std::int32_t normalTexture = -1;
     };
 
     // One draw: a contiguous index range sharing a material.
@@ -55,6 +67,7 @@ namespace r4d
         std::vector<std::uint32_t> indices;
         std::vector<Primitive> primitives;
         std::vector<Material> materials;
+        std::vector<TextureImage> textures;
         Bounds bounds;
 
         bool empty() const { return primitives.empty(); }

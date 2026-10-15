@@ -38,6 +38,10 @@ namespace r4d::d3d12
             float padding[3];
         };
 
+        // Each material owns a contiguous triple of SRVs: base colour,
+        // metallic-roughness, normal. Missing maps point at a default texture.
+        constexpr UINT kTexturesPerMaterial = 3;
+
         static_assert(sizeof(MaterialConstants) % sizeof(UINT32) == 0);
         constexpr UINT kMaterialRootConstants = sizeof(MaterialConstants) / sizeof(UINT32);
 
@@ -198,6 +202,8 @@ namespace r4d::d3d12
         // Before reportLiveObjects, or these always look leaked.
         m_profiler.shutdown();
 
+        m_textures.clear();
+        m_srvHeap.Reset();
         m_depthBuffer.Reset();
         m_dsvHeap.Reset();
         m_captureReadback.Reset();
@@ -656,7 +662,7 @@ namespace r4d::d3d12
         }
 
         // One root CBV at b0; materials in M2 will need more.
-        D3D12_ROOT_PARAMETER1 rootParameters[2]{};
+        D3D12_ROOT_PARAMETER1 rootParameters[3]{};
         rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         rootParameters[0].Descriptor.ShaderRegister = 0;
@@ -672,12 +678,37 @@ namespace r4d::d3d12
         rootParameters[1].Constants.RegisterSpace = 0;
         rootParameters[1].Constants.Num32BitValues = kMaterialRootConstants;
 
+        D3D12_DESCRIPTOR_RANGE1 textureRange{};
+        textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        textureRange.NumDescriptors = kTexturesPerMaterial;
+        textureRange.BaseShaderRegister = 0;
+        textureRange.RegisterSpace = 0;
+        textureRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+        textureRange.OffsetInDescriptorsFromTableStart = 0;
+
+        rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParameters[2].DescriptorTable.NumDescriptorRanges = 1;
+        rootParameters[2].DescriptorTable.pDescriptorRanges = &textureRange;
+
+        D3D12_STATIC_SAMPLER_DESC sampler{};
+        sampler.Filter = D3D12_FILTER_ANISOTROPIC;
+        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sampler.MaxAnisotropy = 8;
+        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        sampler.MinLOD = 0.0f;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        sampler.ShaderRegister = 0;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
         rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
         rootDesc.Desc_1_1.NumParameters = static_cast<UINT>(std::size(rootParameters));
         rootDesc.Desc_1_1.pParameters = rootParameters;
-        rootDesc.Desc_1_1.NumStaticSamplers = 0;
-        rootDesc.Desc_1_1.pStaticSamplers = nullptr;
+        rootDesc.Desc_1_1.NumStaticSamplers = 1;
+        rootDesc.Desc_1_1.pStaticSamplers = &sampler;
         rootDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
         ComPtr<ID3DBlob> serialised;
@@ -738,6 +769,205 @@ namespace r4d::d3d12
                "ID3D12Device::CreateGraphicsPipelineState");
         m_pipelineState->SetName(L"Radiance4D PBR PSO");
 
+        return Status::Ok();
+    }
+
+    Result<ComPtr<ID3D12Resource>> D3D12Renderer::createTexture(
+        const ImageRgba8& image, bool srgb, ID3D12GraphicsCommandList7* commandList,
+        std::vector<ComPtr<ID3D12Resource>>& staging)
+    {
+        const std::vector<ImageRgba8> levels = generateMipChain(image);
+        const auto mipCount = static_cast<UINT16>(levels.size());
+
+        D3D12_RESOURCE_DESC1 desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = image.width;
+        desc.Height = image.height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = mipCount;
+        desc.Format = srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        const auto defaultHeap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+        ComPtr<ID3D12Resource> texture;
+        R4D_HR(m_device->CreateCommittedResource3(&defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
+                                                  D3D12_BARRIER_LAYOUT_COPY_DEST, nullptr,
+                                                  nullptr, 0, nullptr,
+                                                  IID_PPV_ARGS(&texture)),
+               "CreateCommittedResource3 (texture)");
+
+        const D3D12_RESOURCE_DESC uploadSource = texture->GetDesc();
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(mipCount);
+        std::vector<UINT> rowCounts(mipCount);
+        std::vector<UINT64> rowBytes(mipCount);
+        UINT64 totalBytes = 0;
+        m_device->GetCopyableFootprints(&uploadSource, 0, mipCount, 0, footprints.data(),
+                                        rowCounts.data(), rowBytes.data(), &totalBytes);
+
+        const auto uploadHeap = heapProperties(D3D12_HEAP_TYPE_UPLOAD);
+        const auto stagingDesc = bufferDesc(totalBytes);
+        ComPtr<ID3D12Resource> upload;
+        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &stagingDesc,
+                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                 IID_PPV_ARGS(&upload)),
+               "CreateCommittedResource (texture upload)");
+
+        void* mapped = nullptr;
+        const D3D12_RANGE noRead{0, 0};
+        R4D_HR(upload->Map(0, &noRead, &mapped), "Map (texture upload)");
+        for (UINT16 level = 0; level < mipCount; ++level)
+        {
+            auto* destination = static_cast<std::byte*>(mapped) + footprints[level].Offset;
+            const ImageRgba8& source = levels[level];
+            for (UINT row = 0; row < rowCounts[level]; ++row)
+            {
+                std::memcpy(destination + static_cast<std::size_t>(row) *
+                                              footprints[level].Footprint.RowPitch,
+                            source.rgba.data() + static_cast<std::size_t>(row) *
+                                                     source.rowPitch(),
+                            static_cast<std::size_t>(rowBytes[level]));
+            }
+        }
+        upload->Unmap(0, nullptr);
+
+        for (UINT16 level = 0; level < mipCount; ++level)
+        {
+            D3D12_TEXTURE_COPY_LOCATION destination{};
+            destination.pResource = texture.Get();
+            destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            destination.SubresourceIndex = level;
+
+            D3D12_TEXTURE_COPY_LOCATION origin{};
+            origin.pResource = upload.Get();
+            origin.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            origin.PlacedFootprint = footprints[level];
+
+            commandList->CopyTextureRegion(&destination, 0, 0, 0, &origin, nullptr);
+        }
+
+        D3D12_TEXTURE_BARRIER barrier{};
+        barrier.SyncBefore = D3D12_BARRIER_SYNC_COPY;
+        barrier.SyncAfter = D3D12_BARRIER_SYNC_PIXEL_SHADING;
+        barrier.AccessBefore = D3D12_BARRIER_ACCESS_COPY_DEST;
+        barrier.AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+        barrier.LayoutBefore = D3D12_BARRIER_LAYOUT_COPY_DEST;
+        barrier.LayoutAfter = D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
+        barrier.pResource = texture.Get();
+        barrier.Subresources = D3D12_BARRIER_SUBRESOURCE_RANGE{0, mipCount, 0, 1, 0, 1};
+        D3D12_BARRIER_GROUP group{};
+        group.Type = D3D12_BARRIER_TYPE_TEXTURE;
+        group.NumBarriers = 1;
+        group.pTextureBarriers = &barrier;
+        commandList->Barrier(1, &group);
+
+        staging.push_back(upload);
+        return texture;
+    }
+
+    Status D3D12Renderer::uploadTextures(const Model& model)
+    {
+        m_textures.clear();
+
+        // Slots 0..2 are the defaults every material falls back to: white,
+        // white (metallic-roughness factors apply) and a flat normal.
+        ImageRgba8 white;
+        white.width = 1;
+        white.height = 1;
+        white.rgba = {255, 255, 255, 255};
+
+        ImageRgba8 flatNormal = white;
+        flatNormal.rgba = {128, 128, 255, 255};
+
+        const auto descriptorCount =
+            static_cast<UINT>((model.materials.size() + 1) * kTexturesPerMaterial);
+
+        D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        heapDesc.NumDescriptors = descriptorCount;
+        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        R4D_HR(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_srvHeap)),
+               "CreateDescriptorHeap (SRV)");
+        m_srvHeap->SetName(L"Radiance4D SRV Heap");
+        m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        auto& frame = m_frames[0];
+        R4D_HR(frame.commandAllocator->Reset(), "Reset (texture allocator)");
+        R4D_HR(m_commandList->Reset(frame.commandAllocator.Get(), nullptr),
+               "Reset (texture command list)");
+
+        std::vector<ComPtr<ID3D12Resource>> staging;
+
+        auto makeTexture = [&](const ImageRgba8& image,
+                               bool srgb) -> Result<ComPtr<ID3D12Resource>> {
+            return createTexture(image, srgb, m_commandList.Get(), staging);
+        };
+
+        auto whiteSrgb = makeTexture(white, true);
+        if (!whiteSrgb) return whiteSrgb.error();
+        auto whiteLinear = makeTexture(white, false);
+        if (!whiteLinear) return whiteLinear.error();
+        auto normalDefault = makeTexture(flatNormal, false);
+        if (!normalDefault) return normalDefault.error();
+
+        m_textures.push_back(whiteSrgb.value());
+        m_textures.push_back(whiteLinear.value());
+        m_textures.push_back(normalDefault.value());
+
+        std::vector<ComPtr<ID3D12Resource>> modelTextures;
+        modelTextures.reserve(model.textures.size());
+        for (const TextureImage& source : model.textures)
+        {
+            auto created = makeTexture(source.image, source.srgb);
+            if (!created) return created.error();
+            modelTextures.push_back(created.value());
+            m_textures.push_back(created.value());
+        }
+
+        R4D_HR(m_commandList->Close(), "Close (texture command list)");
+        ID3D12CommandList* lists[] = {m_commandList.Get()};
+        m_queue->ExecuteCommandLists(1, lists);
+        const UINT64 fenceValue = m_nextFenceValue++;
+        R4D_HR(m_queue->Signal(m_fence.Get(), fenceValue), "Signal (texture fence)");
+        frame.fenceValue = fenceValue;
+        R4D_TRY(waitForFenceValue(fenceValue));
+
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+        const auto writeSrv = [&](ID3D12Resource* resource) {
+            const D3D12_RESOURCE_DESC desc = resource->GetDesc();
+            D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+            srv.Format = desc.Format;
+            srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srv.Texture2D.MipLevels = desc.MipLevels;
+            m_device->CreateShaderResourceView(resource, &srv, handle);
+            handle.ptr += m_srvDescriptorSize;
+        };
+
+        writeSrv(whiteSrgb.value().Get());
+        writeSrv(whiteLinear.value().Get());
+        writeSrv(normalDefault.value().Get());
+
+        for (const Material& material : model.materials)
+        {
+            const auto pick = [&](std::int32_t index,
+                                  ID3D12Resource* fallback) -> ID3D12Resource* {
+                if (index >= 0 && static_cast<std::size_t>(index) < modelTextures.size())
+                {
+                    return modelTextures[static_cast<std::size_t>(index)].Get();
+                }
+                return fallback;
+            };
+            writeSrv(pick(material.baseColourTexture, whiteSrgb.value().Get()));
+            writeSrv(pick(material.metallicRoughnessTexture, whiteLinear.value().Get()));
+            writeSrv(pick(material.normalTexture, normalDefault.value().Get()));
+        }
+
+        R4D_INFO("Textures: {} uploaded, {} descriptors", model.textures.size(),
+                 descriptorCount);
         return Status::Ok();
     }
 
@@ -850,6 +1080,8 @@ namespace r4d::d3d12
 
         m_primitives = model.primitives;
         m_materials = model.materials;
+
+        R4D_TRY(uploadTextures(model));
 
         R4D_INFO("Geometry: {} vertices, {} triangles, {} primitives",
                  model.vertices.size(), model.triangleCount(), model.primitives.size());
@@ -1002,6 +1234,11 @@ namespace r4d::d3d12
         m_commandList->RSSetScissorRects(1, &scissor);
 
         m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+        if (m_srvHeap)
+        {
+            ID3D12DescriptorHeap* heaps[] = {m_srvHeap.Get()};
+            m_commandList->SetDescriptorHeaps(1, heaps);
+        }
         m_commandList->SetGraphicsRootConstantBufferView(
             0, frame.constantBuffer->GetGPUVirtualAddress());
         m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1026,6 +1263,13 @@ namespace r4d::d3d12
             constants.roughness = material.roughness;
             m_commandList->SetGraphicsRoot32BitConstants(1, kMaterialRootConstants,
                                                          &constants, 0);
+
+            // Defaults occupy the first triple, so materials start one along.
+            D3D12_GPU_DESCRIPTOR_HANDLE table =
+                m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+            table.ptr += static_cast<UINT64>(primitive.materialIndex + 1) *
+                         kTexturesPerMaterial * m_srvDescriptorSize;
+            m_commandList->SetGraphicsRootDescriptorTable(2, table);
 
             m_commandList->DrawIndexedInstanced(primitive.indexCount, 1,
                                                 primitive.firstIndex,

@@ -7,11 +7,17 @@
 ConstantBuffer<FrameConstants> g_frame : register(b0);
 ConstantBuffer<MaterialConstants> g_material : register(b1);
 
+Texture2D g_baseColour        : register(t0);
+Texture2D g_metallicRoughness : register(t1);
+Texture2D g_normal            : register(t2);
+SamplerState g_sampler        : register(s0);
+
 struct PSInput
 {
     float4 position      : SV_Position;
     float3 worldPosition : POSITION0;
     float3 normal        : NORMAL0;
+    float4 tangent       : TANGENT0;
     float2 uv            : TEXCOORD0;
 };
 
@@ -52,11 +58,22 @@ float3 tonemap(float3 colour)
 
 float4 main(PSInput input) : SV_Target0
 {
-    const float3 albedo = g_material.baseColour.rgb;
-    const float metallic = saturate(g_material.metallic);
-    const float roughness = clamp(g_material.roughness, 0.045f, 1.0f);
+    const float4 baseSample = g_baseColour.Sample(g_sampler, input.uv);
+    const float4 base = g_material.baseColour * baseSample;
+    const float3 albedo = base.rgb;
 
-    const float3 n = normalize(input.normal);
+    // glTF packs roughness in green and metallic in blue.
+    const float3 mrSample = g_metallicRoughness.Sample(g_sampler, input.uv).rgb;
+    const float metallic = saturate(g_material.metallic * mrSample.b);
+    const float roughness = clamp(g_material.roughness * mrSample.g, 0.045f, 1.0f);
+
+    float3 n = normalize(input.normal);
+    {
+        const float3 t = normalize(input.tangent.xyz - n * dot(n, input.tangent.xyz));
+        const float3 b = cross(n, t) * input.tangent.w;
+        const float3 sampled = g_normal.Sample(g_sampler, input.uv).xyz * 2.0f - 1.0f;
+        n = normalize(mul(sampled, float3x3(t, b, n)));
+    }
     const float3 v = normalize(g_frame.cameraPosition - input.worldPosition);
     const float nDotV = saturate(dot(n, v)) + 1e-5f;
 
@@ -109,5 +126,5 @@ float4 main(PSInput input) : SV_Target0
     radiance += g_material.emissive;
 
     const float3 mapped = tonemap(radiance * g_frame.exposure);
-    return float4(pow(mapped, 1.0f / 2.2f), g_material.baseColour.a);
+    return float4(pow(mapped, 1.0f / 2.2f), base.a);
 }

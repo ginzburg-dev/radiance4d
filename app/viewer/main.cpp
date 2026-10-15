@@ -340,7 +340,10 @@ namespace
             }
         }
 
-        r4d::Bounds bounds = model.bounds;
+        // Meshes frame on their bounds, as before. Splats cannot: a trained
+        // reconstruction's outliers stretch the bounds far past the subject.
+        r4d::Sphere framing = r4d::boundingSphere(model.bounds);
+        bool framed = wantMesh && model.bounds.valid();
         if (wantSplats)
         {
             r4d::GaussianCloud cloud;
@@ -369,11 +372,15 @@ namespace
                 R4D_CRIT("Cannot upload splats: {}", status.error().ToString());
                 return false;
             }
-            bounds = wantMesh ? merge(bounds, cloud.bounds) : cloud.bounds;
+            R4D_INFO("Splats: framing on centre ({:.3f}, {:.3f}, {:.3f}) radius {:.3f}, "
+                     "against bounds radius {:.3f}",
+                     cloud.framing.centre.x, cloud.framing.centre.y, cloud.framing.centre.z,
+                     cloud.framing.radius, cloud.bounds.radius());
+            framing = framed ? merge(framing, cloud.framing) : cloud.framing;
+            framed = true;
         }
 
-        const float radius = bounds.valid() ? bounds.radius() : 1.0f;
-        camera.focusOn(bounds.centre(), radius);
+        camera.focusOn(framing.centre, framed ? framing.radius : 1.0f);
         return true;
     }
 

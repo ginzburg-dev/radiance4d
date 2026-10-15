@@ -61,6 +61,11 @@ namespace r4d
         bool valid() const { return max.x >= min.x; }
     };
 
+    inline Bounds merge(const Bounds& a, const Bounds& b)
+    {
+        return Bounds{glm::min(a.min, b.min), glm::max(a.max, b.max)};
+    }
+
     struct Model
     {
         std::vector<Vertex> vertices;

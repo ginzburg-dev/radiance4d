@@ -1,7 +1,8 @@
 # Roadmap
 
 Each milestone is independently verifiable. Current position: M3 complete and M4 under way — the
-splat pass, `.ply` datasets and spherical-harmonic colour are in, the performance work is not.
+splat pass, `.ply` datasets, spherical-harmonic colour and the GPU sort are in; culling and binning
+are not.
 
 ## M0 — Environment and architecture
 
@@ -74,13 +75,13 @@ scene heavy enough for the numbers to mean something, and a demo video.
 ## M4 — Static Gaussian splatting
 
 Done: GPU attribute storage, 3D covariance projection to a screen-space conic, alpha compositing
-back to front, a CPU depth sort, a procedural cloud for development and tests, a shared depth
+back to front, a GPU depth sort, a procedural cloud for development and tests, a shared depth
 buffer with the mesh pass, both backends drawing it from the same shaders, `.ply` dataset loading,
 and degree-3 spherical-harmonic colour evaluated per splat from the view direction.
 
-Remaining: visibility culling, tile-based binning, and a GPU sort. Those three are deliberately
-last: they cannot be honestly measured against 20k procedural splats, and need the million-splat
-workload a real dataset provides.
+Remaining: visibility culling and tile-based binning. Both are deliberately last: they cannot be
+honestly measured against 20k procedural splats, and need the million-splat workload a real dataset
+provides.
 
 The `.ply` loader is covered by synthetic files the test suite writes itself, which assert the
 conversions numerically — log-scales exponentiated, the quaternion normalised and read as `wxyz`,
@@ -104,9 +105,28 @@ Carrying degree 3 costs 48 of the 60 floats per splat: the GPU struct is 240 byt
 splats is 240 MB of attributes. Splitting the SH into its own buffer, so that culling and binning
 only touch geometry, is the obvious follow-up once those passes exist.
 
-The scene also put a number on why the remaining work is the remaining work. At 1920x1080 the frame
-costs 93.2 ms of CPU against 23.1 ms of GPU: the full depth sort of 1.03M splats, single-threaded,
-every frame. The GPU sort is no longer a tidiness argument.
+The scene also put a number on why the remaining work is the remaining work, and the sort has since
+been answered. At 1920x1080 the frame cost 96.1 ms of CPU against 35.3 ms of GPU on D3D12 (99.7 and
+32.4 on Vulkan): the full depth sort of 1.03M splats, single-threaded, every frame.
+
+That sort now runs on the GPU — five compute kernels, four passes over an 8-bit digit of a 32-bit
+key, one HLSL source emitted as both DXIL and SPIR-V. A radix sort rather than a bitonic one
+because the work is linear in the splat count rather than n log^2 n, which is what the 6.13M-splat
+stress test will need. The key is the whole float depth under a monotonic bit transform rather than
+a quantised range, so the order is exact, and the sort is stable, so equal depths keep their buffer
+order: on `train` the GPU order reproduces the CPU sort it replaced with 0 of 921,600 pixels
+differing at 1280x720, on both backends, and backend parity is unchanged at max channel delta 23
+and RMSE 0.6806. No test tolerance was changed.
+
+At 1920x1080 the frame is now 22.475 ms of CPU and 22.455 ms of GPU on D3D12, 18.707 and 18.677 on
+Vulkan. The CPU figure sitting within 0.03 ms of the GPU one is the point: the CPU is waiting on
+the GPU rather than sorting, and the frame is GPU-bound for the first time. The GPU figure fell too,
+mostly because the order buffer left the upload heap and the vertex shader stopped fetching a `uint`
+per instance across PCIe; a control at 20,000 splats, where neither build is CPU-bound, puts the two
+within 0.062 ms, so that is work removed and not a clock artefact.
+
+What remains in the frame is the draw itself: one undivided draw call, no visibility culling, no
+tiled binning.
 
 One thing the run exposed that was not on the list above has since been fixed: the viewer framed the
 camera on the cloud's bounding sphere, which a reconstruction's far-flung low-opacity splats stretch

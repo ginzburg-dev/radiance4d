@@ -36,7 +36,8 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 | 3D Gaussian Splatting (projection, sorting, compositing) | working (both backends) |
 | 3DGS `.ply` dataset loading | working (verified on the INRIA `train` scene, 1.03M splats) |
 | Spherical-harmonic colour (degree 3) | working (both backends) |
-| Splat visibility culling, tiled binning, GPU sorting | planned (M4) |
+| Splat GPU depth sorting | working (compute radix sort, both backends) |
+| Splat visibility culling, tiled binning | planned (M4) |
 | COLMAP / gsplat reconstruction | planned (M5) |
 | Hybrid mesh and Gaussian rendering | working (shared depth buffer) |
 | Temporal reprojection and denoising | planned (M7) |
@@ -51,12 +52,35 @@ loads a published 3DGS dataset instead. Each splat carries a position, a linear 
 quaternion, an opacity and 16 spherical-harmonic coefficients per channel; the vertex shader builds
 the 3D covariance, projects it with the perspective Jacobian into a screen-space conic, evaluates
 the SH colour from the view direction, and expands a quad from `SV_VertexID`. The pixel shader
-evaluates the conic and emits premultiplied alpha, and the splats are composited back to front from
-a CPU depth sort.
+evaluates the conic and emits premultiplied alpha, and the splats are composited back to front in
+the order a compute radix sort writes earlier in the same frame.
 
 Without `--scene` the splats replace the mesh scene; with one they share its depth buffer, so
 geometry occludes the splats behind it. Both backends draw the pass from the same HLSL, and the
 parity test holds them to the same image.
+
+### The depth sort
+
+Alpha compositing is order-dependent, so every splat has to be ordered against every other one each
+time the camera moves. That sort runs on the GPU: five compute kernels, four passes over an 8-bit
+digit of a 32-bit key, compiled from one HLSL source to both DXIL and SPIR-V like everything else
+here.
+
+The key is the view-space depth under a monotonic bit transform rather than a quantised range, so
+the ordering is exact, and the sort is stable, so equal depths keep their buffer order. On `train`
+that is enough for the GPU order to reproduce the CPU sort it replaced **pixel for pixel**: 0 of
+921,600 pixels differ at 1280x720, on both backends. Backend parity is unchanged by the switch, at
+the same max channel delta 23 and RMSE 0.6806 the CPU sort produced on this view.
+
+Per pass, each tile of 256 splats counts its digits into a histogram written digit-major; one group
+per digit scans that digit's row; one group scans the 256 row totals; and each tile then scatters,
+taking its destination as the digit's offset in the frame plus the tile's offset within the digit
+plus the element's rank among the tile's elements sharing it. That rank comes from a 256-bit mask
+per digit, one groupshared atomic per element. Scratch is per frame in flight, so the sort needs no
+barrier against the previous frame's reads: the per-slot fence wait has already happened.
+
+The order buffer moved from a CPU-visible upload heap to device-local memory as part of this, which
+also takes the vertex shader's per-instance order fetch off the PCIe bus.
 
 ```
 radiance4d_viewer.exe --splats 20000
@@ -111,9 +135,10 @@ image-down axis of its 301 cameras gives a world direction 4.7° off +y, with 29
   Across the splats themselves the colour moves a median 0.19 in 0..1 units over ten view
   directions, against a median degree-0 contribution of 0.28.
 
-Current limits: one draw call per cloud with no visibility culling or tiled binning, a full CPU sort
-every frame, and 240 bytes of attributes per splat (degree-3 SH is 192 of them), which is 240 MB for
-a million-splat scene.
+Current limits: one draw call per cloud with no visibility culling or tiled binning, and 240 bytes
+of attributes per splat (degree-3 SH is 192 of them), which is 240 MB for a million-splat scene --
+of which the sort reads only the 12 bytes of position. The sort itself adds 39.2 MiB of scratch at
+1.03M splats, across both frames in flight.
 
 A splat cloud is no longer framed on its bounding sphere. A reconstruction leaves sparse
 low-opacity splats far outside the subject, so that sphere is dominated by outliers: in `train` it
@@ -152,8 +177,10 @@ measured frames:
 | 24x16 grid, 385 draws, 1.18M tris | 1920x1080 | Vulkan | 0.408 ms | 0.379 ms |
 | 24x16 grid, 385 draws, 1.18M tris | 3840x2160 | D3D12 | 0.599 ms | 0.574 ms |
 | 24x16 grid, 385 draws, 1.18M tris | 3840x2160 | Vulkan | 0.593 ms | 0.568 ms |
-| INRIA `train`, 1.03M splats | 1920x1080 | D3D12 | 93.189 ms | 23.055 ms |
-| INRIA `train`, 1.03M splats | 1920x1080 | Vulkan | 93.359 ms | 23.271 ms |
+| INRIA `train`, 1.03M splats, CPU sort | 1920x1080 | D3D12 | 96.074 ms | 35.285 ms |
+| INRIA `train`, 1.03M splats, CPU sort | 1920x1080 | Vulkan | 99.731 ms | 32.387 ms |
+| INRIA `train`, 1.03M splats, GPU sort | 1920x1080 | D3D12 | 22.475 ms | 22.455 ms |
+| INRIA `train`, 1.03M splats, GPU sort | 1920x1080 | Vulkan | 18.707 ms | 18.677 ms |
 
 **What these do and do not show.** The mesh scene never loads the GPU: 1.18 million triangles cost
 0.41 ms, and quadrupling the pixel count to 4K only reaches 0.57 ms, so the frame is bounded by
@@ -166,13 +193,24 @@ submission overhead, which stops mattering as soon as the frame has real work in
 statement about shading performance. Drawing a D3D12-versus-Vulkan conclusion from this would be
 wrong.
 
-The splat row is the opposite case, and it is the first scene here heavy enough to be worth
-measuring. 93 ms of CPU against 23 ms of GPU is a frame spent sorting: every one of the 1.03M
-splats is depth-sorted on the CPU, every frame, single-threaded, and the draw itself is the smaller
-half. Both backends land within 0.2 ms of each other because they run the same sort — that number
-says nothing about D3D12 against Vulkan and everything about where the remaining M4 work is. The
-GPU figure is also not a shading measurement while the pass is one undivided draw with no culling
-or binning.
+The splat rows are the opposite case, and they are the first scene here heavy enough to be worth
+measuring. The two CPU-sort rows are what the pass cost before the sort moved: 96 and 100 ms of CPU
+against 35 and 32 ms of GPU, a frame spent sorting, with every one of the 1.03M splats depth-sorted
+on one core every frame. Both backends landed within 4 ms of each other because they ran the same
+sort; that said nothing about D3D12 against Vulkan.
+
+Moving the sort to the GPU takes the CPU frame to 22.475 and 18.707 ms, and the CPU figure is now
+within 0.03 ms of the GPU one on both backends — the CPU is no longer doing the work, it is waiting
+for the GPU, and the frame is GPU-bound for the first time.
+
+The GPU figure fell as well, from 35.285 to 22.455 ms on D3D12. That is not the sort being free: it
+is mostly the order buffer leaving the upload heap, which stops the vertex shader fetching a
+`uint` per instance across PCIe. A control at 20,000 splats, where neither build is CPU-bound and
+the GPU is loaded the same either way, puts the two within 0.062 ms of each other (2.414 against
+2.476 ms), so the difference at a million splats is work removed rather than a clock artefact.
+
+What is left is the draw. Both numbers are still one undivided draw call with no visibility culling
+and no tiled binning, which is exactly the remaining M4 work.
 
 A real profiler is still outstanding.
 

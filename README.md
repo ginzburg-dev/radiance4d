@@ -220,6 +220,8 @@ measured frames:
 | INRIA `train`, 1.03M splats, CPU sort | 1920x1080 | Vulkan | 99.731 ms | 32.387 ms |
 | INRIA `train`, 1.03M splats, GPU sort | 1920x1080 | D3D12 | 22.475 ms | 22.455 ms |
 | INRIA `train`, 1.03M splats, GPU sort | 1920x1080 | Vulkan | 18.707 ms | 18.677 ms |
+| INRIA `truck`, 2.54M splats, GPU sort | 1920x1080 | D3D12 | 14.718 ms | 14.698 ms |
+| INRIA `truck`, 2.54M splats, GPU sort | 1920x1080 | Vulkan | 14.045 ms | 14.018 ms |
 
 **What these do and do not show.** The mesh scene never loads the GPU: 1.18 million triangles cost
 0.41 ms, and quadrupling the pixel count to 4K only reaches 0.57 ms, so the frame is bounded by
@@ -248,8 +250,45 @@ is mostly the order buffer leaving the upload heap, which stops the vertex shade
 the GPU is loaded the same either way, puts the two within 0.062 ms of each other (2.414 against
 2.476 ms), so the difference at a million splats is work removed rather than a clock artefact.
 
-What is left is the draw. Both numbers are still one undivided draw call with no visibility culling
-and no tiled binning, which is exactly the remaining M4 work.
+The CPU and GPU figures stay locked together at 2.54M splats — 14.718 against 14.698 ms on D3D12,
+14.045 against 14.018 on Vulkan — so nothing has crept back onto the CPU at 2.5x the work.
+
+**2.5x the splats is cheaper, not dearer, and that is the result.** `truck` carries 2,541,226 splats
+against `train`'s 1,026,508, and its frame costs 14.698 ms of GPU against `train`'s 22.050 ms on
+D3D12. (`train` was re-run alongside it on the same build and reproduced the published row to within
+0.5 ms; the `truck` rows are the mean of three 100-frame runs.) The frame is not bounded by the
+splat count. It is bounded by rasterised area, and at their respective framing cameras `train`
+covers far more screen per splat than `truck` does. The defect above is not what produces that
+ordering either: with the clamp applied as a probe, the same comparison is `truck` 9.432 ms against
+`train` 14.470 ms, so both get cheaper and `truck` stays the cheaper one.
+
+Shrinking the render target to 160x90 removes essentially all of the fill and leaves the
+view-independent work, which is the sort plus the per-splat projection. Mean GPU time over three
+100-frame runs, clamp probe applied so both scenes project the same way:
+
+| 160x90 | `train`, 1.03M | `truck`, 2.54M | ratio |
+|---|---|---|---|
+| D3D12 | 2.472 ms | 6.123 ms | 2.477 |
+| Vulkan | 2.182 ms | 7.217 ms | 3.308 |
+
+Against a splat-count ratio of 2.476, D3D12 is linear to within 0.1%. Vulkan is not: it is 12%
+cheaper than D3D12 at a million splats and 18% dearer at 2.5 million. A procedural sweep, which
+holds the data distribution fixed and varies only the count, puts the crossover between 2M and
+2.54M splats and has the gap still widening at 4M:
+
+| 160x90, GPU | 250k | 500k | 1M | 2M | 2.54M | 4M |
+|---|---|---|---|---|---|---|
+| D3D12 | 0.886 | 1.669 | 3.432 | 7.127 | 8.105 | 13.279 ms |
+| Vulkan | 0.764 | 1.620 | 3.340 | 6.863 | 8.960 | 14.698 ms |
+
+From 1M to 4M D3D12 goes up 3.87x for 4x the splats; Vulkan goes up 4.40x. Which of the five sort
+kernels or the draw accounts for it is not something these numbers separate, because there is no
+per-pass timing yet. That is what the missing profiler is for, and it is now the first thing worth
+building.
+
+What is left in the frame is still the draw. Every number here is one undivided draw call with no
+visibility culling and no tiled binning, which is exactly the remaining M4 work — and the fact that
+fill, not splat count, sets the frame is the argument for doing the binning.
 
 A real profiler is still outstanding.
 

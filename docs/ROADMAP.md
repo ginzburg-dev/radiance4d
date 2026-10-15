@@ -84,16 +84,35 @@ workload a real dataset provides.
 
 The `.ply` loader is covered by synthetic files the test suite writes itself, which assert the
 conversions numerically — log-scales exponentiated, the quaternion normalised and read as `wxyz`,
-the opacity sigmoid, and the channel-major SH transposed into the GPU layout. Published scenes are
-hundreds of megabytes to several gigabytes and cannot live in the repository, so loading one is a
-manual step, written down in the README. It has not been done yet.
+the opacity sigmoid, the channel-major SH transposed into the GPU layout, and the mirror out of
+COLMAP's frame. Published scenes are hundreds of megabytes to several gigabytes and cannot live in
+the repository, so loading one stays a manual step, written down in the README.
+
+A published scene has now been through it: INRIA's pre-trained `train`, 1,026,508 splats at SH
+degree 3, 234.9 MiB of GPU attributes, zero validation errors on both backends, and the two
+backends agreeing to a max channel delta of 1 (RMSE 0.0089) at 1280x720. Parse and convert takes
+0.41 s and the upload 0.08 s in RelWithDebInfo.
+
+That run settled the coordinate question. COLMAP's frame is right-handed with +y down and the
+engine is left-handed with +y up, so the loader now mirrors y — positions, the rotation quaternion
+as `(w, -x, y, -z)`, and the six SH bands odd in y. The direction was taken from the dataset rather
+than assumed: averaging the image-down axis of the model's own 301 cameras lands 4.7° from +y. The
+result is a rigid flip and nothing more — the corrected capture matches the vertical flip of the
+un-mirrored one to RMSE 0.0111, where mirroring positions alone gives RMSE 5.2367.
 
 Carrying degree 3 costs 48 of the 60 floats per splat: the GPU struct is 240 bytes, so a million
 splats is 240 MB of attributes. Splitting the SH into its own buffer, so that culling and binning
 only touch geometry, is the obvious follow-up once those passes exist.
 
-No coordinate-system conversion is applied on load. Datasets authored in COLMAP's frame may appear
-mirrored relative to their published renders; that is the first thing to check against a real scene.
+The scene also put a number on why the remaining work is the remaining work. At 1920x1080 the frame
+costs 93.2 ms of CPU against 23.1 ms of GPU: the full depth sort of 1.03M splats, single-threaded,
+every frame. The GPU sort is no longer a tidiness argument.
+
+One thing the run exposed that is not on the list above: the viewer frames the camera on the cloud's
+bounding sphere, and a reconstruction's far-flung low-opacity splats stretch that sphere far past
+the subject. In `train`, x spans about 149 units against an interquartile range of about 4, so the
+scene renders into a few percent of the frame. A framing that ignores the tail is wanted before any
+dataset screenshot is worth keeping.
 
 ## M5 — Reconstruction pipeline
 

@@ -34,7 +34,7 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 | Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
 | Cross-API image parity test | working |
 | 3D Gaussian Splatting (projection, sorting, compositing) | working (both backends) |
-| 3DGS `.ply` dataset loading | working (not yet run against a published scene) |
+| 3DGS `.ply` dataset loading | working (verified on the INRIA `train` scene, 1.03M splats) |
 | Spherical-harmonic colour (degree 3) | working (both backends) |
 | Splat visibility culling, tiled binning, GPU sorting | planned (M4) |
 | COLMAP / gsplat reconstruction | planned (M5) |
@@ -76,14 +76,51 @@ stay zero. ASCII and big-endian files, list properties and multi-element files a
 error rather than guessed at.
 
 Published scenes are hundreds of megabytes to several gigabytes, so none is committed here and the
-test suite writes its own synthetic files instead. **Loading a real scene is a manual step and has
-not been done yet** — download a trained `point_cloud.ply` (for example from the INRIA 3DGS release)
-and pass it to `--splat-ply`. No coordinate-system conversion is applied, so a scene in COLMAP's
-frame may come out mirrored against its published render; that is the first thing to check.
+test suite writes its own synthetic files instead. Loading one is a manual step: download a trained
+`point_cloud.ply` (for example from the INRIA 3DGS release) and pass it to `--splat-ply`.
+
+**Coordinate frame.** COLMAP's world frame, which 3DGS trains in, is right-handed with +y down,
+while the engine is left-handed with +y up, so the loader mirrors y. Positions, the rotation
+quaternion and the spherical harmonics all have to move together. With `M = diag(1, -1, 1)` the
+covariance `M (R S S^T R^T) M^T` keeps its scales and takes the rotation `M R M`, which is the
+quaternion `(w, x, y, z)` becoming `(w, -x, y, -z)`; the six SH bands whose basis polynomial is odd
+in y change sign, so the colour along a direction survives the flip. Without the mirror a published
+scene loads upside down.
+
+That frame was not guessed. The INRIA `train` model ships a `cameras.json`, and averaging the
+image-down axis of its 301 cameras gives a world direction 4.7° off +y, with 297 of the 301 within
+25° of that mean — the capture's own idea of "down" is the file's +y.
+
+**What a published scene actually did.** INRIA 3DGS pre-trained `train` (Tanks and Temples),
+`point_cloud/iteration_30000/point_cloud.ply`: 1,026,508 splats, 62 properties, SH degree 3,
+243 MiB on disk and 234.9 MiB of GPU attributes. Headless at 1280x720, 8 frames, fixed step, RTX
+3080 Laptop GPU:
+
+- Zero validation errors on both backends, in Debug with the debug layer and validation layer on
+  and in RelWithDebInfo.
+- D3D12 against Vulkan: max channel delta 1, RMSE 0.0089, 172 of 921,600 pixels differ. Debug and
+  RelWithDebInfo captures are byte-identical within a backend.
+- Parse and convert 0.41 s, upload 0.08 s (RelWithDebInfo, warm file cache, i7-11800H); 2.0 s and
+  0.25 s in Debug.
+- The mirror is a rigid flip and nothing else: the corrected capture matches the vertical flip of
+  the un-mirrored one to max delta 5 / RMSE 0.0111. Mirroring positions alone, leaving the rotation
+  and SH in the file's frame, gives max delta 244 / RMSE 5.2367 against the same reference, which is
+  what makes that comparison worth running.
+- The colour is view-dependent, not flat. Rendering a degree-0 copy of the same file — identical
+  geometry, `f_rest` dropped — differs by max channel delta 77, RMSE 0.9092 over 13,494 pixels.
+  Across the splats themselves the colour moves a median 0.19 in 0..1 units over ten view
+  directions, against a median degree-0 contribution of 0.28.
 
 Current limits: one draw call per cloud with no visibility culling or tiled binning, a full CPU sort
 every frame, and 240 bytes of attributes per splat (degree-3 SH is 192 of them), which is 240 MB for
 a million-splat scene.
+
+Framing a real scene is also still crude. The viewer points the camera at the cloud's bounding
+sphere, and reconstruction leaves sparse low-opacity splats far outside the subject — in `train`,
+x spans about 149 units while its interquartile range is about 4 — so the bounding radius is
+dominated by outliers and the subject lands in a few percent of the frame. A robust framing that
+ignores the tail is needed before `--splat-ply` gives a presentable image, and that is why there is
+no dataset screenshot here yet.
 
 ## Measurements
 
@@ -102,11 +139,13 @@ measured frames:
 | 24x16 grid, 385 draws, 1.18M tris | 1920x1080 | Vulkan | 0.408 ms | 0.379 ms |
 | 24x16 grid, 385 draws, 1.18M tris | 3840x2160 | D3D12 | 0.599 ms | 0.574 ms |
 | 24x16 grid, 385 draws, 1.18M tris | 3840x2160 | Vulkan | 0.593 ms | 0.568 ms |
+| INRIA `train`, 1.03M splats | 1920x1080 | D3D12 | 93.189 ms | 23.055 ms |
+| INRIA `train`, 1.03M splats | 1920x1080 | Vulkan | 93.359 ms | 23.271 ms |
 
-**What these do and do not show.** The scene never loads the GPU: 1.18 million triangles cost 0.41 ms,
-and quadrupling the pixel count to 4K only reaches 0.57 ms, so the frame is bounded by fixed
-per-frame cost rather than by geometry or fill. Headless means no present, so swapchain cost is
-excluded.
+**What these do and do not show.** The mesh scene never loads the GPU: 1.18 million triangles cost
+0.41 ms, and quadrupling the pixel count to 4K only reaches 0.57 ms, so the frame is bounded by
+fixed per-frame cost rather than by geometry or fill. Headless means no present, so swapchain cost
+is excluded.
 
 The one thing the numbers do support is where the backends differ. On the light scene Vulkan is
 0.05 ms behind on CPU; by 4K the two are within 0.006 ms of each other. The gap is command
@@ -114,7 +153,15 @@ submission overhead, which stops mattering as soon as the frame has real work in
 statement about shading performance. Drawing a D3D12-versus-Vulkan conclusion from this would be
 wrong.
 
-A scene heavy enough to be worth measuring, and a real profiler, are both still outstanding.
+The splat row is the opposite case, and it is the first scene here heavy enough to be worth
+measuring. 93 ms of CPU against 23 ms of GPU is a frame spent sorting: every one of the 1.03M
+splats is depth-sorted on the CPU, every frame, single-threaded, and the draw itself is the smaller
+half. Both backends land within 0.2 ms of each other because they run the same sort — that number
+says nothing about D3D12 against Vulkan and everything about where the remaining M4 work is. The
+GPU figure is also not a shading measurement while the pass is one undivided draw with no culling
+or binning.
+
+A real profiler is still outstanding.
 
 ## Building
 

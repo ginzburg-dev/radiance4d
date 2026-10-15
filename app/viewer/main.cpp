@@ -20,6 +20,7 @@
 #include <exception>
 #include <format>
 #include <string>
+#include <utility>
 #include <algorithm>
 #include <string_view>
 #include <vector>
@@ -46,6 +47,7 @@ namespace
         std::uint64_t benchmarkFrames = 0;
         std::uint32_t splatCount = 0;
         std::uint32_t splatSeed = 1337;
+        std::string splatPlyPath;
         int gridColumns = 7;
         int gridRows = 5;
         bool help = false;
@@ -70,6 +72,8 @@ namespace
             "  --splats <n>                 render n procedural 3D Gaussians; without\n"
             "                               --scene they replace the mesh scene\n"
             "  --splat-seed <n>             seed for the procedural cloud\n"
+            "  --splat-ply <file.ply>       load a 3DGS .ply dataset instead of the\n"
+            "                               procedural cloud\n"
             "  --benchmark <n>              measure n frames after a warm-up and\n"
             "                               report timings; forces --no-debug\n"
             "  --exposure <value>           tone mapping exposure\n"
@@ -173,6 +177,11 @@ namespace
                 std::uint64_t parsed = 0;
                 if (!next(value) || !parseUint(value, parsed)) return false;
                 options.splatCount = static_cast<std::uint32_t>(parsed);
+            }
+            else if (arg == "--splat-ply")
+            {
+                if (!next(value)) return false;
+                options.splatPlyPath = std::string{value};
             }
             else if (arg == "--splat-seed")
             {
@@ -291,7 +300,8 @@ namespace
     {
         // A splat-only run skips the mesh entirely, which keeps the first
         // verification of the projection free of anything else.
-        const bool wantMesh = options.splatCount == 0 || !options.scenePath.empty();
+        const bool wantSplats = options.splatCount != 0 || !options.splatPlyPath.empty();
+        const bool wantMesh = !wantSplats || !options.scenePath.empty();
 
         r4d::Model model;
         if (!wantMesh)
@@ -331,10 +341,29 @@ namespace
         }
 
         r4d::Bounds bounds = model.bounds;
-        if (options.splatCount != 0)
+        if (wantSplats)
         {
-            const r4d::GaussianCloud cloud =
-                r4d::makeProceduralGaussianCloud(options.splatCount, options.splatSeed);
+            r4d::GaussianCloud cloud;
+            if (!options.splatPlyPath.empty())
+            {
+                if (options.splatCount != 0)
+                {
+                    R4D_WARN("--splat-ply and --splats are both set; loading the dataset");
+                }
+                auto loaded = r4d::loadGaussianPly(options.splatPlyPath);
+                if (!loaded)
+                {
+                    R4D_CRIT("Cannot load splats: {}", loaded.error().ToString());
+                    return false;
+                }
+                cloud = std::move(loaded.value());
+            }
+            else
+            {
+                cloud = r4d::makeProceduralGaussianCloud(options.splatCount,
+                                                         options.splatSeed);
+            }
+
             if (auto status = gpu.uploadGaussians(cloud); !status)
             {
                 R4D_CRIT("Cannot upload splats: {}", status.error().ToString());

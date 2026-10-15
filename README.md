@@ -27,7 +27,7 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 | glTF loading (cgltf) | working |
 | PBR shading, analytic lights | working |
 | Base colour, metallic-roughness, normal maps | working |
-| ImGui statistics overlay | working (D3D12 only) |
+| ImGui statistics overlay | working (both backends) |
 | Image-based lighting (procedural sky) | working |
 | Shadow mapping (key light, PCF) | working |
 | Exposure control | working |

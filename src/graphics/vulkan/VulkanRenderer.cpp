@@ -3,6 +3,10 @@
 
 #include <radiance4d/core/FileSystem.hpp>
 
+#include <imgui.h>
+#include <imgui_impl_vulkan.h>
+#include <imgui_impl_win32.h>
+
 #include <windows.h>
 
 #include <algorithm>
@@ -158,6 +162,11 @@ namespace r4d::vulkan
         R4D_INFO("Renderer: shader directory '{}'", shaderDirectory.string());
         R4D_TRY(createPipeline(shaderDirectory));
         R4D_TRY(createShadowPipeline(shaderDirectory));
+
+        if (!m_headless)
+        {
+            R4D_TRY(initialiseUi(desc.windowHandle));
+        }
 
         R4D_INFO("Renderer: initialised, {} frames in flight", kFramesInFlight);
         return Status::Ok();
@@ -333,6 +342,103 @@ namespace r4d::vulkan
         return Status::Ok();
     }
 
+    Status VulkanRenderer::initialiseUi(void* windowHandle)
+    {
+        // 1.93 allocates separate sampler and sampled-image descriptors as well
+        // as combined ones, so all three have to be present.
+        const VkDescriptorPoolSize sizes[] = {
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8},
+            {VK_DESCRIPTOR_TYPE_SAMPLER, 8},
+            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8},
+        };
+        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.maxSets = 16;
+        poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
+        poolInfo.pPoolSizes = sizes;
+        R4D_VK(vkCreateDescriptorPool(m_context.device, &poolInfo, nullptr, &m_uiPool),
+               "vkCreateDescriptorPool (ImGui)");
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::StyleColorsDark();
+        ImGui::GetIO().IniFilename = nullptr;
+
+        if (!ImGui_ImplWin32_Init(windowHandle))
+        {
+            return makeError(ErrorCode::ApiCallFailed, "ImGui_ImplWin32_Init failed");
+        }
+
+        VkFormat colourFormat = m_swapchainFormat;
+        VkPipelineRenderingCreateInfo rendering{
+            VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+        rendering.colorAttachmentCount = 1;
+        rendering.pColorAttachmentFormats = &colourFormat;
+        rendering.depthAttachmentFormat = kDepthFormat;
+
+        ImGui_ImplVulkan_InitInfo info{};
+        info.ApiVersion = VK_API_VERSION_1_3;
+        info.Instance = m_context.instance;
+        info.PhysicalDevice = m_context.physicalDevice;
+        info.Device = m_context.device;
+        info.QueueFamily = m_context.queueFamily;
+        info.Queue = m_context.queue;
+        info.DescriptorPool = m_uiPool;
+        info.MinImageCount = kFramesInFlight;
+        info.ImageCount = static_cast<std::uint32_t>(
+            std::max<std::size_t>(m_swapchainImages.size(), kFramesInFlight));
+        // Dynamic rendering, matching the rest of the backend: no render pass object.
+        info.UseDynamicRendering = true;
+        info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        info.PipelineInfoMain.PipelineRenderingCreateInfo = rendering;
+
+        if (!ImGui_ImplVulkan_Init(&info))
+        {
+            return makeError(ErrorCode::ApiCallFailed, "ImGui_ImplVulkan_Init failed");
+        }
+
+        m_uiReady = true;
+        R4D_INFO("UI: Dear ImGui {} ready", IMGUI_VERSION);
+        return Status::Ok();
+    }
+
+    void VulkanRenderer::shutdownUi()
+    {
+        if (!m_uiReady)
+        {
+            return;
+        }
+        m_uiReady = false;
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+        if (m_uiPool != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorPool(m_context.device, m_uiPool, nullptr);
+            m_uiPool = VK_NULL_HANDLE;
+        }
+    }
+
+    void VulkanRenderer::renderUi(VkCommandBuffer commandBuffer)
+    {
+        if (!m_uiReady)
+        {
+            return;
+        }
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        if (m_uiCallback)
+        {
+            m_uiCallback();
+        }
+
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+    }
+
     Status VulkanRenderer::createShadowMap()
     {
         destroyImage(m_shadowMap);
@@ -465,11 +571,10 @@ namespace r4d::vulkan
         binding.stride = sizeof(Vertex);
         binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
+        // Only position: the shadow shader consumes nothing else, and declaring
+        // unused attributes makes the validation layer complain.
         const VkVertexInputAttributeDescription attributes[] = {
             {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)},
-            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)},
-            {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, tangent)},
-            {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)},
         };
 
         VkPipelineVertexInputStateCreateInfo vertexInput{
@@ -1561,6 +1666,8 @@ namespace r4d::vulkan
             }
         }
 
+        renderUi(frame.commandBuffer);
+
         vkCmdEndRendering(frame.commandBuffer);
 
         imageBarrier(frame.commandBuffer, colourImage,
@@ -1690,6 +1797,8 @@ namespace r4d::vulkan
         if (m_context.device != VK_NULL_HANDLE)
         {
             vkDeviceWaitIdle(m_context.device);
+
+            shutdownUi();
         }
     }
 
@@ -1699,6 +1808,14 @@ namespace r4d::vulkan
         {
             return makeError(ErrorCode::InvalidArgument,
                              "captureFrame called before any frame was rendered");
+        }
+        if (!m_headless)
+        {
+            // After Present the swapchain image is no longer acquired, and
+            // transitioning it would be invalid. Capture is a headless path here.
+            return makeError(ErrorCode::UnsupportedFeature,
+                             "the Vulkan backend can only capture in headless mode; "
+                             "use --headless, or --backend d3d12 to capture a window");
         }
 
         waitForGpuIdle();

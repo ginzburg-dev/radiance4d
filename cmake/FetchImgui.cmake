@@ -18,5 +18,6 @@ set(R4D_IMGUI_SOURCES
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
 )
 message(STATUS "Dear ImGui: ${imgui_SOURCE_DIR}")

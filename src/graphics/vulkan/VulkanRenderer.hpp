@@ -103,6 +103,9 @@ namespace r4d::vulkan
         Status createPipeline(const std::filesystem::path& shaderDirectory);
         Status createDescriptorSets(const Model& model);
         Status createTimestampPool();
+        Status initialiseUi(void* windowHandle);
+        void shutdownUi();
+        void renderUi(VkCommandBuffer commandBuffer);
 
         Result<Buffer> createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                                     VkMemoryPropertyFlags properties, const char* name);
@@ -169,6 +172,8 @@ namespace r4d::vulkan
         std::vector<Primitive> m_primitives;
         std::vector<Material> m_materials;
 
+        VkDescriptorPool m_uiPool = VK_NULL_HANDLE;
+        bool m_uiReady = false;
         VkQueryPool m_timestampPool = VK_NULL_HANDLE;
         std::array<bool, kFramesInFlight> m_timestampWritten{};
 

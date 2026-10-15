@@ -58,6 +58,9 @@ if(R4D_ENABLE_VULKAN)
         vulkan/VulkanDevice.cpp
     )
     target_include_directories(r4d_graphics PRIVATE "${R4D_VULKAN_INCLUDE_DIR}")
+    # The ImGui Vulkan backend needs the headers too.
+    set_source_files_properties("${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
+        PROPERTIES INCLUDE_DIRECTORIES "${R4D_VULKAN_INCLUDE_DIR}")
     target_link_libraries(r4d_graphics PRIVATE "${R4D_VULKAN_LIBRARY}")
     target_compile_definitions(r4d_graphics PRIVATE
         R4D_ENABLE_VULKAN=1

@@ -72,7 +72,7 @@ developer command prompt.
 | `--frames <n>` | Exit after n frames |
 | `--resize-cycles <n>` | Walk the window through a set of sizes |
 | `--headless` | No window, offscreen target |
-| `--out <file.png>` | Write the last rendered frame |
+| `--out <file.png>` | Write the last rendered frame. Vulkan supports this in `--headless` only; D3D12 can also capture a window. |
 | `--fixed-step <seconds>` | Fixed animation step; required for a reproducible capture |
 | `--log-level <0..5>` | 0 trace, 2 info, 4 error |
 

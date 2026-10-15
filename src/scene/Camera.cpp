@@ -56,7 +56,9 @@ namespace r4d
         {
             if (input.mouseDown(MouseButton::Left))
             {
-                m_yaw -= mouseDelta.x * m_orbitSpeed;
+                // The drag grabs the subject, as the pitch and the pan below do:
+                // it turns with the cursor, not against it.
+                m_yaw += mouseDelta.x * m_orbitSpeed;
                 m_pitch = std::clamp(m_pitch - mouseDelta.y * m_orbitSpeed,
                                      -kPitchLimit, kPitchLimit);
             }

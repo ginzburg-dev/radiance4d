@@ -3,8 +3,9 @@
 // Published datasets are hundreds of megabytes to several gigabytes and cannot
 // live in the repository, so the suite writes its own .ply and asserts the
 // conversions numerically: exponentiated log-scales, a normalised quaternion in
-// the right component order, the opacity sigmoid and the SH transpose. Loading a
-// real scene stays a manual step, written down in the README.
+// the right component order, the opacity sigmoid, the SH transpose and the
+// mirror out of COLMAP's y-down frame. Loading a published scene stays a manual
+// step, written down in the README.
 
 #include <radiance4d/scene/GaussianCloud.hpp>
 
@@ -123,7 +124,52 @@ namespace
     // a transposed or shifted SH copy cannot pass.
     double restValue(int channel, int band) { return 100.0 * channel + band + 1.0; }
 
+    // The loader mirrors the file's y, and a basis function odd in y changes
+    // sign with it. These six are the odd ones in the Splat.vs.hlsl ordering.
+    bool bandIsOddInY(int band)
+    {
+        return band == 1 || band == 4 || band == 5 || band == 9 || band == 10 || band == 11;
+    }
+
+    // What f_rest_(channel * perChannel + band - 1) must read back as.
+    double mirroredRestValue(int channel, int band)
+    {
+        const double value = restValue(channel, band - 1);
+        return bandIsOddInY(band) ? -value : value;
+    }
+
     int coefficientsFor(int degree) { return (degree + 1) * (degree + 1); }
+
+    // The basis evaluateSh in Splat.vs.hlsl uses, duplicated so a test can state
+    // what the frame change must preserve -- the colour along a direction --
+    // instead of restating the signs the loader applies. If the shader's basis
+    // ever changes, this has to move with it.
+    r4d::Vec3 evaluateSh(const float* sh, r4d::Vec3 d)
+    {
+        static_assert(r4d::kShCoefficients == 16, "this basis is written out to degree 3");
+        const auto band = [sh](int k) {
+            return r4d::Vec3{sh[k * 3], sh[k * 3 + 1], sh[k * 3 + 2]};
+        };
+        const float x = d.x, y = d.y, z = d.z;
+        const float xx = x * x, yy = y * y, zz = z * z;
+        const float xy = x * y, yz = y * z, xz = x * z;
+
+        r4d::Vec3 colour = 0.28209479177387814f * band(0);
+        colour += 0.4886025119029199f * (-y * band(1) + z * band(2) - x * band(3));
+        colour += 1.0925484305920792f * xy * band(4);
+        colour += -1.0925484305920792f * yz * band(5);
+        colour += 0.31539156525252005f * (2.0f * zz - xx - yy) * band(6);
+        colour += -1.0925484305920792f * xz * band(7);
+        colour += 0.5462742152960396f * (xx - yy) * band(8);
+        colour += -0.5900435899266435f * y * (3.0f * xx - yy) * band(9);
+        colour += 2.890611442640554f * xy * z * band(10);
+        colour += -0.4570457994644658f * y * (4.0f * zz - xx - yy) * band(11);
+        colour += 0.3731763325901154f * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * band(12);
+        colour += -0.4570457994644658f * x * (4.0f * zz - xx - yy) * band(13);
+        colour += 1.445305721320277f * z * (xx - yy) * band(14);
+        colour += -0.5900435899266435f * x * (xx - 3.0f * yy) * band(15);
+        return colour;
+    }
 
     // The property order the reference implementation writes.
     Vertex canonicalVertex(const RawSplat& raw, int degree)
@@ -209,7 +255,7 @@ TEST_F(GaussianPly, ConvertsTheStoredActivationsOnLoad)
     const r4d::Gaussian& g = loaded.value().gaussians.front();
 
     EXPECT_NEAR(g.position.x, 1.5f, kTolerance);
-    EXPECT_NEAR(g.position.y, -2.25f, kTolerance);
+    EXPECT_NEAR(g.position.y, 2.25f, kTolerance);   // mirrored out of COLMAP's frame
     EXPECT_NEAR(g.position.z, 0.75f, kTolerance);
 
     // Log-scales are exponentiated, not passed through.
@@ -226,7 +272,8 @@ TEST_F(GaussianPly, ConvertsTheStoredActivationsOnLoad)
 TEST_F(GaussianPly, QuaternionIsNormalisedAndReadAsWxyz)
 {
     // The single easiest bug to ship here: .ply stores wxyz, the POD stores xyzw.
-    // Four distinct components pin both the order and the normalisation.
+    // Four distinct components pin both the order and the normalisation; x and z
+    // then come back negated because the y mirror below turns the axis around.
     const RawSplat raw;
     writePly(path(), {canonicalVertex(raw, 3)});
 
@@ -236,9 +283,9 @@ TEST_F(GaussianPly, QuaternionIsNormalisedAndReadAsWxyz)
 
     const float norm = std::sqrt(1.0f + 4.0f + 9.0f + 16.0f);   // sqrt(30)
     EXPECT_NEAR(q.w, 1.0f / norm, kTolerance);
-    EXPECT_NEAR(q.x, 2.0f / norm, kTolerance);
+    EXPECT_NEAR(q.x, -2.0f / norm, kTolerance);
     EXPECT_NEAR(q.y, 3.0f / norm, kTolerance);
-    EXPECT_NEAR(q.z, 4.0f / norm, kTolerance);
+    EXPECT_NEAR(q.z, -4.0f / norm, kTolerance);
     EXPECT_NEAR(glm::length(q), 1.0f, kTolerance);
 }
 
@@ -266,9 +313,84 @@ TEST_F(GaussianPly, TransposesTheChannelMajorShIntoCoefficientMajor)
     {
         for (int c = 0; c < 3; ++c)
         {
-            EXPECT_NEAR(g.sh[band * 3 + c], static_cast<float>(restValue(c, band - 1)),
+            EXPECT_NEAR(g.sh[band * 3 + c], static_cast<float>(mirroredRestValue(c, band)),
                         kTolerance)
                 << "band " << band << " channel " << c;
+        }
+    }
+}
+
+TEST_F(GaussianPly, MirrorsTheRotationSoTheCovarianceIsReflected)
+{
+    // (w, -x, y, -z) is only shorthand. What the loader has to deliver is the
+    // rotation of the reflected covariance, M R S S^T R^T M^T with
+    // M = diag(1, -1, 1), which is R' = M R M at unchanged scales.
+    const RawSplat raw;
+    writePly(path(), {canonicalVertex(raw, 3)});
+
+    auto loaded = r4d::loadGaussianPly(path());
+    ASSERT_TRUE(loaded.ok()) << loaded.error().ToString();
+    const r4d::Gaussian& g = loaded.value().gaussians.front();
+
+    const r4d::Quat fileRotation = glm::normalize(
+        r4d::Quat{static_cast<float>(raw.rotation[0]), static_cast<float>(raw.rotation[1]),
+                  static_cast<float>(raw.rotation[2]), static_cast<float>(raw.rotation[3])});
+    const r4d::Mat3 mirror{1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    const r4d::Mat3 want = mirror * glm::mat3_cast(fileRotation) * mirror;
+    const r4d::Mat3 got = glm::mat3_cast(g.rotation);
+
+    for (int column = 0; column < 3; ++column)
+    {
+        for (int row = 0; row < 3; ++row)
+        {
+            EXPECT_NEAR(got[column][row], want[column][row], kTolerance)
+                << "column " << column << " row " << row;
+        }
+    }
+
+    // A reflection would flip the handedness of the splat's own frame.
+    EXPECT_NEAR(glm::determinant(got), 1.0f, kTolerance);
+    EXPECT_NEAR(g.scale.x, 0.25f, kTolerance);
+    EXPECT_NEAR(g.scale.y, 1.0f, kTolerance);
+    EXPECT_NEAR(g.scale.z, 3.0f, kTolerance);
+}
+
+TEST_F(GaussianPly, MirroredShShowsTheSameColourAlongTheMirroredDirection)
+{
+    // The property the SH sign flips exist for: a splat seen along d in the
+    // file's frame must be the colour seen along the mirrored d in ours. That
+    // is stronger than restating which six bands the loader negates.
+    const RawSplat raw;
+    writePly(path(), {canonicalVertex(raw, 3)});
+
+    auto loaded = r4d::loadGaussianPly(path());
+    ASSERT_TRUE(loaded.ok()) << loaded.error().ToString();
+
+    float fileSh[r4d::kShCoefficients * 3]{};
+    for (int c = 0; c < 3; ++c)
+    {
+        fileSh[c] = static_cast<float>(raw.dc[c]);
+        for (int band = 1; band < r4d::kShCoefficients; ++band)
+        {
+            fileSh[band * 3 + c] = static_cast<float>(restValue(c, band - 1));
+        }
+    }
+
+    // Deliberately off-axis, so no basis function sits at a zero of its own.
+    const r4d::Vec3 directions[]{{0.3f, 0.5f, -0.81f}, {-0.6f, -0.2f, 0.77f},
+                                 {0.48f, -0.73f, 0.49f}, {-0.35f, 0.62f, 0.70f}};
+    for (const r4d::Vec3& raw3 : directions)
+    {
+        const r4d::Vec3 d = glm::normalize(raw3);
+        const r4d::Vec3 want = evaluateSh(fileSh, d);
+        const r4d::Vec3 got =
+            evaluateSh(loaded.value().gaussians.front().sh, r4d::Vec3{d.x, -d.y, d.z});
+
+        // The coefficients run to a few hundred, so this is a relative bound.
+        for (int c = 0; c < 3; ++c)
+        {
+            EXPECT_NEAR(got[c], want[c], 1e-3f * (1.0f + std::abs(want[c])))
+                << "direction (" << d.x << ", " << d.y << ", " << d.z << ") channel " << c;
         }
     }
 }
@@ -343,7 +465,7 @@ TEST_F(GaussianPly, ALowerDegreeFileLeavesTheMissingBandsZero)
     {
         for (int c = 0; c < 3; ++c)
         {
-            EXPECT_NEAR(g.sh[band * 3 + c], static_cast<float>(restValue(c, band - 1)),
+            EXPECT_NEAR(g.sh[band * 3 + c], static_cast<float>(mirroredRestValue(c, band)),
                         kTolerance);
         }
     }

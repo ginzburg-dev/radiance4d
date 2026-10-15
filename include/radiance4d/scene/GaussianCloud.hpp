@@ -77,8 +77,10 @@ namespace r4d
     // Binary little-endian .ply as written by the 3DGS reference implementation.
     // Properties are matched by name, since exporters disagree on field order.
     //
-    // No coordinate-system conversion is applied: positions, rotations and the SH
-    // basis stay in the frame the file was authored in.
+    // The file's frame is COLMAP's, right-handed with +y down, and the engine's
+    // is left-handed with +y up, so the loader mirrors y: positions, the rotation
+    // quaternion and the SH bands that are odd in y all change frame together.
+    // Without it a published scene loads upside down.
     Result<GaussianCloud> loadGaussianPly(const std::filesystem::path& path);
 
 } // namespace r4d

@@ -424,6 +424,46 @@ namespace r4d
             return fields;
         }
 
+        // Bands whose basis polynomial is odd in y, in the Splat.vs.hlsl order:
+        // 1 is y, 4 is xy, 5 is yz, 9 is y(3x^2 - y^2), 10 is xyz and 11 is
+        // y(4z^2 - x^2 - y^2). The other ten are even in y.
+        constexpr int kYOddBands[] = {1, 4, 5, 9, 10, 11};
+
+        // COLMAP's world frame, which 3DGS trains and publishes in, is
+        // right-handed with +y down; the engine is GLM_FORCE_LEFT_HANDED with +y
+        // up. The two differ by the reflection M = diag(1, -1, 1), applied here
+        // so a dataset arrives the way its publisher renders it rather than
+        // upside down.
+        //
+        // The covariance transforms as M (R S S^T R^T) M^T, which factors into
+        // (M R M)(S S^T)(M R M)^T because M is its own inverse and S S^T is
+        // diagonal: the scales are untouched and the rotation becomes M R M,
+        // still a rotation since det(M)^2 = 1. Conjugating a rotation by an
+        // orthogonal Q maps its axis to det(Q) Q a and leaves the angle alone,
+        // so with det(M) = -1 the axis (x, y, z) becomes (-x, y, -z) and the
+        // quaternion (w, x, y, z) becomes (w, -x, y, -z).
+        //
+        // The SH basis is evaluated from the view direction, whose y flips along
+        // with everything else, so every coefficient on a basis function that is
+        // odd in y has to change sign for the colour to come out unchanged.
+        void mirrorIntoEngineFrame(Gaussian& g)
+        {
+            g.position.y = -g.position.y;
+            g.rotation = Quat{g.rotation.w, -g.rotation.x, g.rotation.y, -g.rotation.z};
+
+            for (const int band : kYOddBands)
+            {
+                if (band >= kShCoefficients)
+                {
+                    break;      // a lower runtime degree simply has fewer of them
+                }
+                for (int c = 0; c < 3; ++c)
+                {
+                    g.sh[band * 3 + c] = -g.sh[band * 3 + c];
+                }
+            }
+        }
+
         Gaussian convertVertex(const std::byte* vertex, const Fields& fields)
         {
             Gaussian g;
@@ -461,6 +501,8 @@ namespace r4d
                     g.sh[(k + 1) * 3 + c] = readField(vertex, fields.rest[source]);
                 }
             }
+
+            mirrorIntoEngineFrame(g);
             return g;
         }
     } // namespace

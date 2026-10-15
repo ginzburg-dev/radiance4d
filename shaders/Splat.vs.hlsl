@@ -14,8 +14,8 @@ struct Gaussian
     float3 scale;
     float  padding0;
     float4 rotation;   // quaternion, xyzw, matching the glm storage order
-    float3 colour;
-    float  padding1;
+    // Coefficient-major: band k, channel c at sh[k * 3 + c].
+    float  sh[R4D_SH_COEFFICIENTS * 3];
 };
 
 StructuredBuffer<Gaussian> g_gaussians : register(t0);
@@ -28,6 +28,41 @@ struct VSOutput
     float2 offset   : TEXCOORD1;   // pixels from the centre
     float3 colour   : COLOR0;
 };
+
+float3 shBand(Gaussian g, uint band)
+{
+    return float3(g.sh[band * 3], g.sh[band * 3 + 1], g.sh[band * 3 + 2]);
+}
+
+// The 3DGS basis, evaluated in the frame the splats were authored in: the
+// degree-0 band is an offset from mid grey, the rest are view dependent.
+// Negative radiance is clamped away rather than wrapped.
+float3 evaluateSh(Gaussian g, float3 direction)
+{
+    const float x = direction.x, y = direction.y, z = direction.z;
+    const float xx = x * x, yy = y * y, zz = z * z;
+    const float xy = x * y, yz = y * z, xz = x * z;
+
+    float3 colour = 0.28209479177387814f * shBand(g, 0);
+
+    colour += 0.4886025119029199f * (-y * shBand(g, 1) + z * shBand(g, 2) - x * shBand(g, 3));
+
+    colour +=  1.0925484305920792f * xy * shBand(g, 4);
+    colour += -1.0925484305920792f * yz * shBand(g, 5);
+    colour +=  0.31539156525252005f * (2.0f * zz - xx - yy) * shBand(g, 6);
+    colour += -1.0925484305920792f * xz * shBand(g, 7);
+    colour +=  0.5462742152960396f * (xx - yy) * shBand(g, 8);
+
+    colour += -0.5900435899266435f * y * (3.0f * xx - yy) * shBand(g, 9);
+    colour +=  2.890611442640554f * xy * z * shBand(g, 10);
+    colour += -0.4570457994644658f * y * (4.0f * zz - xx - yy) * shBand(g, 11);
+    colour +=  0.3731763325901154f * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * shBand(g, 12);
+    colour += -0.4570457994644658f * x * (4.0f * zz - xx - yy) * shBand(g, 13);
+    colour +=  1.445305721320277f * z * (xx - yy) * shBand(g, 14);
+    colour += -0.5900435899266435f * x * (xx - 3.0f * yy) * shBand(g, 15);
+
+    return max(colour + 0.5f, 0.0f);
+}
 
 float3x3 quaternionToMatrix(float4 q)
 {
@@ -117,6 +152,6 @@ VSOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     output.position = float4(quadNdc, clip.z / clip.w, 1.0f);
     output.conic = float4(conic, g.opacity);
     output.offset = corner * radius;
-    output.colour = g.colour;
+    output.colour = evaluateSh(g, normalize(g.position - g_frame.cameraPosition));
     return output;
 }

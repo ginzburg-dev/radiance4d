@@ -3,6 +3,7 @@
 
 #include <radiance4d/core/Log.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <random>
 
@@ -25,6 +26,28 @@ namespace r4d
             return glm::angleAxis(std::atan2(sine, glm::dot(from, to)), axis / sine);
         }
     } // namespace
+
+    void GaussianCloud::recomputeBounds()
+    {
+        bool first = true;
+        for (const Gaussian& g : gaussians)
+        {
+            const float extent = std::max({g.scale.x, g.scale.y, g.scale.z}) * 3.0f;
+            const Vec3 low = g.position - Vec3{extent};
+            const Vec3 high = g.position + Vec3{extent};
+            if (first)
+            {
+                bounds.min = low;
+                bounds.max = high;
+                first = false;
+            }
+            else
+            {
+                bounds.min = glm::min(bounds.min, low);
+                bounds.max = glm::max(bounds.max, high);
+            }
+        }
+    }
 
     GaussianCloud makeProceduralGaussianCloud(std::uint32_t count, std::uint32_t seed)
     {
@@ -54,7 +77,7 @@ namespace r4d
                 g.position = Vec3{radius * std::sin(phi) * std::cos(theta),
                                   radius * std::cos(phi) * 0.55f,
                                   radius * std::sin(phi) * std::sin(theta)};
-                g.colour = Vec3{0.25f + 0.65f * unit(rng), 0.45f, 0.95f};
+                setConstantColour(g, Vec3{0.25f + 0.65f * unit(rng), 0.45f, 0.95f});
                 g.opacity = 0.35f + 0.4f * unit(rng);
                 g.scale = Vec3{0.03f, 0.03f, 0.03f} * (0.6f + unit(rng));
             }
@@ -67,7 +90,7 @@ namespace r4d
                 const float radius = 0.6f + t * 1.1f;
                 g.position = Vec3{radius * std::cos(angle), (t - 0.5f) * 1.8f,
                                   radius * std::sin(angle)};
-                g.colour = Vec3{0.95f, 0.45f + 0.4f * t, 0.2f};
+                setConstantColour(g, Vec3{0.95f, 0.45f + 0.4f * t, 0.2f});
                 g.opacity = 0.55f + 0.35f * unit(rng);
                 g.scale = Vec3{0.11f, 0.018f, 0.018f};
 
@@ -87,8 +110,9 @@ namespace r4d
                 g.position = Vec3{radius * std::sin(phi) * std::cos(theta),
                                   radius * std::cos(phi),
                                   radius * std::sin(phi) * std::sin(theta)};
-                g.colour = Vec3{0.55f + 0.4f * unit(rng), 0.6f + 0.3f * unit(rng),
-                                0.7f + 0.3f * unit(rng)};
+                setConstantColour(g, Vec3{0.55f + 0.4f * unit(rng),
+                                          0.6f + 0.3f * unit(rng),
+                                          0.7f + 0.3f * unit(rng)});
                 g.opacity = 0.04f + 0.10f * unit(rng);
                 g.scale = Vec3{0.05f, 0.05f, 0.05f} * (0.5f + 1.5f * unit(rng));
             }
@@ -104,26 +128,7 @@ namespace r4d
             cloud.gaussians.push_back(g);
         }
 
-        bool first = true;
-        for (const Gaussian& g : cloud.gaussians)
-        {
-            // Pad by the largest scale so the bounds cover the splat, not just its
-            // centre.
-            const float extent = std::max({g.scale.x, g.scale.y, g.scale.z}) * 3.0f;
-            const Vec3 low = g.position - Vec3{extent};
-            const Vec3 high = g.position + Vec3{extent};
-            if (first)
-            {
-                cloud.bounds.min = low;
-                cloud.bounds.max = high;
-                first = false;
-            }
-            else
-            {
-                cloud.bounds.min = glm::min(cloud.bounds.min, low);
-                cloud.bounds.max = glm::max(cloud.bounds.max, high);
-            }
-        }
+        cloud.recomputeBounds();
 
         R4D_INFO("Gaussians: {} procedural splats", cloud.count());
         return cloud;

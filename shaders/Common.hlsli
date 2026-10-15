@@ -8,6 +8,10 @@
 
 #define R4D_LIGHT_COUNT 3
 
+// Spherical-harmonic coefficients per splat. Must match kShCoefficients in
+// GaussianCloud.hpp, which asserts the resulting struct size.
+#define R4D_SH_COEFFICIENTS 16
+
 struct Light
 {
     float3 direction;   // towards the light

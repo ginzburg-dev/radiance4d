@@ -71,6 +71,8 @@ developer command prompt.
 | `--gpu-validation` | GPU-based validation; slow, never benchmark with it |
 | `--frames <n>` | Exit after n frames |
 | `--resize-cycles <n>` | Walk the window through a set of sizes |
+| `--grid <cols>x<rows>` | Size of the built-in material grid |
+| `--benchmark <n>` | Measure n frames after a warm-up; forces headless and no debug layer |
 | `--headless` | No window, offscreen target |
 | `--out <file.png>` | Write the last rendered frame. Vulkan supports this in `--headless` only; D3D12 can also capture a window. |
 | `--fixed-step <seconds>` | Fixed animation step; required for a reproducible capture |

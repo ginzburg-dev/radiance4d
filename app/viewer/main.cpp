@@ -43,6 +43,8 @@ namespace
         double fixedTimeStep = 0.0;
         float exposure = -1.0f;   // negative: keep the renderer default
         std::uint64_t benchmarkFrames = 0;
+        int gridColumns = 7;
+        int gridRows = 5;
         bool help = false;
     };
 
@@ -143,6 +145,22 @@ namespace
             {
                 if (!next(value)) return false;
                 options.outputPath = std::string{value};
+            }
+            else if (arg == "--grid")
+            {
+                if (!next(value)) return false;
+                const std::size_t split = value.find('x');
+                if (split == std::string_view::npos) return false;
+                std::uint64_t columns = 0;
+                std::uint64_t rows = 0;
+                if (!parseUint(value.substr(0, split), columns) ||
+                    !parseUint(value.substr(split + 1), rows))
+                {
+                    return false;
+                }
+                if (columns < 2 || rows < 2) return false;
+                options.gridColumns = static_cast<int>(columns);
+                options.gridRows = static_cast<int>(rows);
             }
             else if (arg == "--benchmark")
             {
@@ -256,7 +274,7 @@ namespace
         r4d::Model model;
         if (options.scenePath.empty())
         {
-            model = r4d::makeDemoScene();
+            model = r4d::makeDemoScene(options.gridColumns, options.gridRows);
             R4D_INFO("Scene: built-in material grid");
         }
         else

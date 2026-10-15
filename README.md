@@ -44,21 +44,33 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 ## Measurements
 
 `--benchmark <n>` renders headless with the debug layer off, discards 64 warm-up frames and reports
-CPU and GPU frame time. GPU time comes from timestamp queries around the frame.
+CPU and GPU frame time. GPU time comes from timestamp queries around the frame. `--grid <cols>x<rows>`
+sizes the built-in scene.
 
-Material grid, 1920x1080, 36 draws, 107522 triangles, RTX 3080 Laptop GPU (GA104, 16 GB), driver
-617.14, i7-11800H, RelWithDebInfo, vsync off:
+RTX 3080 Laptop GPU (GA104, 16 GB), driver 617.14, i7-11800H, RelWithDebInfo, vsync off, mean of the
+measured frames:
 
-| Backend | CPU mean | CPU p95 | GPU mean | GPU p95 |
+| Scene | Resolution | Backend | CPU | GPU |
 |---|---|---|---|---|
-| D3D12 | 0.164 ms | 0.181 ms | 0.142 ms | 0.143 ms |
-| Vulkan | 0.214 ms | 0.232 ms | 0.148 ms | 0.150 ms |
+| 7x5 grid, 36 draws, 108k tris | 1920x1080 | D3D12 | 0.164 ms | 0.142 ms |
+| 7x5 grid, 36 draws, 108k tris | 1920x1080 | Vulkan | 0.214 ms | 0.148 ms |
+| 24x16 grid, 385 draws, 1.18M tris | 1920x1080 | D3D12 | 0.433 ms | 0.412 ms |
+| 24x16 grid, 385 draws, 1.18M tris | 1920x1080 | Vulkan | 0.408 ms | 0.379 ms |
+| 24x16 grid, 385 draws, 1.18M tris | 3840x2160 | D3D12 | 0.599 ms | 0.574 ms |
+| 24x16 grid, 385 draws, 1.18M tris | 3840x2160 | Vulkan | 0.593 ms | 0.568 ms |
 
-**Read these for what they are.** At 0.14 ms the scene is far too small to say anything about
-rendering throughput: the figures are dominated by fixed per-frame overhead, and the gap between the
-backends is submission overhead, not shading. Headless means no present, so swapchain cost is
-excluded. Treating this as a D3D12-versus-Vulkan result would be wrong. A scene heavy enough to be
-worth measuring, and a real profiler, are both still outstanding.
+**What these do and do not show.** The scene never loads the GPU: 1.18 million triangles cost 0.41 ms,
+and quadrupling the pixel count to 4K only reaches 0.57 ms, so the frame is bounded by fixed
+per-frame cost rather than by geometry or fill. Headless means no present, so swapchain cost is
+excluded.
+
+The one thing the numbers do support is where the backends differ. On the light scene Vulkan is
+0.05 ms behind on CPU; by 4K the two are within 0.006 ms of each other. The gap is command
+submission overhead, which stops mattering as soon as the frame has real work in it, and it is not a
+statement about shading performance. Drawing a D3D12-versus-Vulkan conclusion from this would be
+wrong.
+
+A scene heavy enough to be worth measuring, and a real profiler, are both still outstanding.
 
 ## Building
 

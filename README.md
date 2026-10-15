@@ -39,7 +39,26 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 | Temporal reprojection and denoising | planned (M7) |
 | Dynamic 4D Gaussians | planned (M8) |
 
-No performance figures are published yet: there is no benchmark scene and no profiler installed.
+![Material grid](docs/images/material-grid.png)
+
+## Measurements
+
+`--benchmark <n>` renders headless with the debug layer off, discards 64 warm-up frames and reports
+CPU and GPU frame time. GPU time comes from timestamp queries around the frame.
+
+Material grid, 1920x1080, 36 draws, 107522 triangles, RTX 3080 Laptop GPU (GA104, 16 GB), driver
+617.14, i7-11800H, RelWithDebInfo, vsync off:
+
+| Backend | CPU mean | CPU p95 | GPU mean | GPU p95 |
+|---|---|---|---|---|
+| D3D12 | 0.164 ms | 0.181 ms | 0.142 ms | 0.143 ms |
+| Vulkan | 0.214 ms | 0.232 ms | 0.148 ms | 0.150 ms |
+
+**Read these for what they are.** At 0.14 ms the scene is far too small to say anything about
+rendering throughput: the figures are dominated by fixed per-frame overhead, and the gap between the
+backends is submission overhead, not shading. Headless means no present, so swapchain cost is
+excluded. Treating this as a D3D12-versus-Vulkan result would be wrong. A scene heavy enough to be
+worth measuring, and a real profiler, are both still outstanding.
 
 ## Building
 

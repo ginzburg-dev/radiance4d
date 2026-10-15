@@ -62,10 +62,13 @@ turned out to be real is frame-constant assembly and the model/stats bookkeeping
 descriptor and synchronisation models differ enough that a common layer would have obscured more
 than it shared. `Renderer` remains the single seam.
 
-## Showcase polish (next)
+## Showcase polish
 
-Image-based lighting, shadows, a licensed glTF scene, GPU profiling with a real tool, screenshots
-and a demo video.
+Done: image-based lighting, shadow mapping, a licensed glTF scene, the ImGui overlay on both
+backends, exposure control, a reproducible benchmark mode and README screenshots.
+
+Outstanding: GPU profiling with a real tool (PIX, Nsight Graphics or RenderDoc; none installed), a
+scene heavy enough for the numbers to mean something, and a demo video.
 
 ## M4 — Static Gaussian splatting
 

@@ -19,6 +19,7 @@
 #include <exception>
 #include <format>
 #include <string>
+#include <algorithm>
 #include <string_view>
 #include <vector>
 
@@ -41,6 +42,7 @@ namespace
         std::string outputPath;
         double fixedTimeStep = 0.0;
         float exposure = -1.0f;   // negative: keep the renderer default
+        std::uint64_t benchmarkFrames = 0;
         bool help = false;
     };
 
@@ -60,6 +62,8 @@ namespace
             "  --scene <file.gltf>          load a glTF or glb scene\n"
             "  --headless                   no window; render to an offscreen target\n"
             "  --out <file.png>             write the last rendered frame as a PNG\n"
+            "  --benchmark <n>              measure n frames after a warm-up and\n"
+            "                               report timings; forces --no-debug\n"
             "  --exposure <value>           tone mapping exposure\n"
             "  --fixed-step <seconds>       advance animation by a fixed amount per\n"
             "                               frame instead of using the wall clock,\n"
@@ -140,6 +144,11 @@ namespace
                 if (!next(value)) return false;
                 options.outputPath = std::string{value};
             }
+            else if (arg == "--benchmark")
+            {
+                if (!next(value) || !parseUint(value, options.benchmarkFrames)) return false;
+                if (options.benchmarkFrames == 0) return false;
+            }
             else if (arg == "--exposure")
             {
                 if (!next(value)) return false;
@@ -182,6 +191,64 @@ namespace
     }
 
     bool optionsExposureSet(const Options& options) { return options.exposure > 0.0f; }
+
+    struct Samples
+    {
+        std::vector<double> cpu;
+        std::vector<double> gpu;
+    };
+
+    double percentile(std::vector<double> values, double fraction)
+    {
+        if (values.empty())
+        {
+            return 0.0;
+        }
+        std::sort(values.begin(), values.end());
+        const std::size_t index = static_cast<std::size_t>(
+            std::min(values.size() - 1.0, fraction * (values.size() - 1)));
+        return values[index];
+    }
+
+    double mean(const std::vector<double>& values)
+    {
+        if (values.empty())
+        {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (double v : values) sum += v;
+        return sum / static_cast<double>(values.size());
+    }
+
+    void reportBenchmark(const r4d::Renderer& gpu, const Options& options,
+                         const Samples& samples)
+    {
+        const auto& stats = gpu.stats();
+        R4D_INFO("");
+        R4D_INFO("Benchmark: {} frames at {}x{}, {}, vsync {}, debug layer off",
+                 samples.cpu.size(), stats.renderResolution.x, stats.renderResolution.y,
+                 r4d::ToString(gpu.backend()), options.vsync ? "on" : "off");
+        R4D_INFO("  adapter   {}", gpu.adapterInfo().name);
+        R4D_INFO("  scene     {} draws, {} triangles",
+                 stats.drawCalls, stats.triangles);
+        R4D_INFO("  CPU  min {:.3f}  mean {:.3f}  p95 {:.3f} ms",
+                 samples.cpu.empty() ? 0.0 : *std::min_element(samples.cpu.begin(),
+                                                               samples.cpu.end()),
+                 mean(samples.cpu), percentile(samples.cpu, 0.95));
+        if (samples.gpu.empty())
+        {
+            R4D_INFO("  GPU  not measured");
+        }
+        else
+        {
+            R4D_INFO("  GPU  min {:.3f}  mean {:.3f}  p95 {:.3f} ms",
+                     *std::min_element(samples.gpu.begin(), samples.gpu.end()),
+                     mean(samples.gpu), percentile(samples.gpu, 0.95));
+        }
+        R4D_WARN("These are this machine only. Quote them with hardware, driver, "
+                 "resolution, API and settings, or not at all.");
+    }
 
     // Loads the scene, uploads it and frames the camera on it.
     bool setupScene(r4d::Renderer& gpu, r4d::Camera& camera, const Options& options)
@@ -336,6 +403,12 @@ namespace
             return 1;
         }
 
+        // A warm-up is not optional: the first frames include pipeline creation
+        // and first-touch allocations, and GPU timings are not valid at all until
+        // the first timestamp resolve lands.
+        constexpr std::uint64_t kWarmupFrames = 64;
+        Samples samples;
+
         int exitCode = 0;
         std::uint64_t frame = 0;
         for (; frame < options.frameLimit; ++frame)
@@ -348,6 +421,20 @@ namespace
                 exitCode = 1;
                 break;
             }
+
+            if (options.benchmarkFrames != 0 && frame >= kWarmupFrames)
+            {
+                samples.cpu.push_back(gpu.stats().cpuFrameMs);
+                if (gpu.stats().gpuTimingsValid)
+                {
+                    samples.gpu.push_back(gpu.stats().gpuFrameMs);
+                }
+            }
+        }
+
+        if (options.benchmarkFrames != 0 && exitCode == 0)
+        {
+            reportBenchmark(gpu, options, samples);
         }
 
         if (exitCode == 0 && !writeCaptureIfRequested(gpu, options))
@@ -540,6 +627,16 @@ int main(int argc, char** argv)
     {
         printUsage();
         return 0;
+    }
+
+    if (options.benchmarkFrames != 0)
+    {
+        // Measuring with the debug layer on would report the layer, not the renderer.
+        options.debugLayer = false;
+        options.gpuValidation = false;
+        options.headless = true;
+        options.vsync = false;
+        options.frameLimit = options.benchmarkFrames + 64;
     }
 
     Logger::instance().init(static_cast<LogLevel>(options.logLevel), true,

@@ -116,17 +116,24 @@ that. On `train` it is radius 2.4 against the bounds' 145, which is a camera 5.5
 of 326. The dataset's 301 capture cameras stand a median 3.42 units from the centre, so that is
 inside the volume the scene was photographed from. The bounds themselves are untouched.
 
-Two things still stand between `--splat-ply` and a screenshot worth keeping, both outside framing:
+Two things stood between `--splat-ply` and a screenshot worth keeping, both outside framing, and
+both are now done:
 
-- `Splat.vs.hlsl` does not clamp the Jacobian to the frustum. The Jacobian is a local linearisation
+- `Splat.vs.hlsl` did not clamp the Jacobian to the frustum. The Jacobian is a local linearisation
   and the reference implementation clamps the off-axis ratio to 1.3 times the half-frustum before
   building it; without that, a splat off to the side of a camera standing inside the reconstruction
-  gets a covariance that covers the frame, and the capture is a white wash. Adding the clamp leaves
-  all 12 tests and the stored WARP references passing, and makes the scene resolve into two
-  locomotives, their lettering, the ballast and the hillside. It also tightens D3D12-against-Vulkan
-  parity at that camera from max delta 23 / RMSE 0.6806 to max delta 1 / RMSE 0.0313.
-- The orbit camera always starts at yaw 0 and pitch 0, which for `train` points into foliage. The
-  viewer has no way to ask for a direction, so a capture cannot be aimed.
+  gets a covariance that covers the frame, and the capture is a near-white wash. With the clamp the
+  same camera resolves into two locomotives, their lettering, the ballast and the hillside: the two
+  captures differ over 99.98% of the frame. The procedural cloud barely notices — 33 of 230,400
+  pixels move by one level at 640x360 — and the stored WARP references pass untouched.
+- The orbit camera always started at yaw 0 and pitch 0, which for `train` points into foliage, and
+  the viewer had no way to ask for a direction. `--orbit-yaw` and `--orbit-pitch` now set the
+  starting angles, defaulting to 0. No direction is baked into the code for a particular scene;
+  the angle that suits `train` is written down in the README beside the capture command.
+
+`docs/images/train-dataset.png` is that capture: 1280x720, Debug, zero validation errors on both
+backends, D3D12 against Vulkan at max channel delta 2 / RMSE 0.0447 over 0.49% of pixels, and
+byte-identical between two runs of the same command.
 
 ## M5 — Reconstruction pipeline
 

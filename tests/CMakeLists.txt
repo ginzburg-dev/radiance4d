@@ -13,12 +13,14 @@ set(R4D_UNIT_TESTS
     RollingAverage_test.cpp
     ImageIO_test.cpp
     IncludeHygiene_test.cpp
+    GaussianCloud_test.cpp
 )
 
 # Tests that create a real D3D12 device on WARP.
 set(R4D_DEVICE_TESTS
     D3D12Device_test.cpp
     HeadlessRender_test.cpp
+    SplatRender_test.cpp
 )
 
 # Needs a real GPU: there is no software Vulkan device the way WARP covers D3D12.

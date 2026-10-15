@@ -10,6 +10,7 @@
 #include <radiance4d/graphics/DebugUi.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
 #include <radiance4d/scene/Camera.hpp>
+#include <radiance4d/scene/GaussianCloud.hpp>
 #include <radiance4d/scene/Model.hpp>
 
 #include <array>
@@ -43,6 +44,8 @@ namespace
         double fixedTimeStep = 0.0;
         float exposure = -1.0f;   // negative: keep the renderer default
         std::uint64_t benchmarkFrames = 0;
+        std::uint32_t splatCount = 0;
+        std::uint32_t splatSeed = 1337;
         int gridColumns = 7;
         int gridRows = 5;
         bool help = false;
@@ -64,6 +67,9 @@ namespace
             "  --scene <file.gltf>          load a glTF or glb scene\n"
             "  --headless                   no window; render to an offscreen target\n"
             "  --out <file.png>             write the last rendered frame as a PNG\n"
+            "  --splats <n>                 render n procedural 3D Gaussians; without\n"
+            "                               --scene they replace the mesh scene\n"
+            "  --splat-seed <n>             seed for the procedural cloud\n"
             "  --benchmark <n>              measure n frames after a warm-up and\n"
             "                               report timings; forces --no-debug\n"
             "  --exposure <value>           tone mapping exposure\n"
@@ -161,6 +167,18 @@ namespace
                 if (columns < 2 || rows < 2) return false;
                 options.gridColumns = static_cast<int>(columns);
                 options.gridRows = static_cast<int>(rows);
+            }
+            else if (arg == "--splats")
+            {
+                std::uint64_t parsed = 0;
+                if (!next(value) || !parseUint(value, parsed)) return false;
+                options.splatCount = static_cast<std::uint32_t>(parsed);
+            }
+            else if (arg == "--splat-seed")
+            {
+                std::uint64_t parsed = 0;
+                if (!next(value) || !parseUint(value, parsed)) return false;
+                options.splatSeed = static_cast<std::uint32_t>(parsed);
             }
             else if (arg == "--benchmark")
             {
@@ -271,8 +289,15 @@ namespace
     // Loads the scene, uploads it and frames the camera on it.
     bool setupScene(r4d::Renderer& gpu, r4d::Camera& camera, const Options& options)
     {
+        // A splat-only run skips the mesh entirely, which keeps the first
+        // verification of the projection free of anything else.
+        const bool wantMesh = options.splatCount == 0 || !options.scenePath.empty();
+
         r4d::Model model;
-        if (options.scenePath.empty())
+        if (!wantMesh)
+        {
+        }
+        else if (options.scenePath.empty())
         {
             model = r4d::makeDemoScene(options.gridColumns, options.gridRows);
             R4D_INFO("Scene: built-in material grid");
@@ -296,14 +321,30 @@ namespace
             gpu.setRenderSettings(settings);
         }
 
-        if (auto status = gpu.uploadModel(model); !status)
+        if (wantMesh)
         {
-            R4D_CRIT("Cannot upload scene: {}", status.error().ToString());
-            return false;
+            if (auto status = gpu.uploadModel(model); !status)
+            {
+                R4D_CRIT("Cannot upload scene: {}", status.error().ToString());
+                return false;
+            }
         }
 
-        const float radius = model.bounds.valid() ? model.bounds.radius() : 1.0f;
-        camera.focusOn(model.bounds.centre(), radius);
+        r4d::Bounds bounds = model.bounds;
+        if (options.splatCount != 0)
+        {
+            const r4d::GaussianCloud cloud =
+                r4d::makeProceduralGaussianCloud(options.splatCount, options.splatSeed);
+            if (auto status = gpu.uploadGaussians(cloud); !status)
+            {
+                R4D_CRIT("Cannot upload splats: {}", status.error().ToString());
+                return false;
+            }
+            bounds = wantMesh ? merge(bounds, cloud.bounds) : cloud.bounds;
+        }
+
+        const float radius = bounds.valid() ? bounds.radius() : 1.0f;
+        camera.focusOn(bounds.centre(), radius);
         return true;
     }
 

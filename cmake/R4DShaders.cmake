@@ -68,8 +68,10 @@ function(r4d_add_shader_target target)
             # Vulkan clip space has Y pointing the other way than D3D. Flipping it
             # in the shader keeps one winding convention for both backends, and the
             # flag is only legal in stages that produce a position.
+            # Shadow.vs is excluded: its output is sampled through explicit UV
+            # maths, not presented, so it keeps native clip space on both APIs.
             set(_invert_y "")
-            if(_stage STREQUAL "vs")
+            if(_stage STREQUAL "vs" AND NOT _stem MATCHES "^Shadow")
                 set(_invert_y "-fvk-invert-y")
             endif()
             add_custom_command(
@@ -79,6 +81,7 @@ function(r4d_add_shader_target target)
                         -E main
                         -spirv
                         -fspv-target-env=vulkan1.3
+                        -D R4D_VULKAN_TARGET=1
                         -fvk-b-shift ${R4D_VK_B_SHIFT} 0
                         -fvk-t-shift ${R4D_VK_T_SHIFT} 0
                         -fvk-s-shift ${R4D_VK_S_SHIFT} 0

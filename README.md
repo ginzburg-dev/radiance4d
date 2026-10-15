@@ -29,6 +29,7 @@ Milestone M3 complete. Features marked *planned* are not implemented.
 | Base colour, metallic-roughness, normal maps | working |
 | ImGui statistics overlay | working (D3D12 only) |
 | Image-based lighting (procedural sky) | working |
+| Shadow mapping (key light, PCF) | working |
 | Exposure control | working |
 | Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
 | Cross-API image parity test | working |

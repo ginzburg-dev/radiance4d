@@ -92,6 +92,10 @@ namespace r4d::d3d12
 
         Status createOffscreenTarget(UVec2 size);
         Status createDepthBuffer(UVec2 size);
+        Status createShadowMap();
+        Status createShadowPipeline(const std::filesystem::path& shaderDirectory);
+        void renderShadowPass();
+        Mat4 lightViewProjection() const;
         Status initialiseUi(void* windowHandle);
         void shutdownUi();
         void renderUi();
@@ -113,6 +117,10 @@ namespace r4d::d3d12
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
         ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
         ComPtr<ID3D12Resource> m_depthBuffer;
+        ComPtr<ID3D12Resource> m_shadowMap;
+        ComPtr<ID3D12PipelineState> m_shadowPipeline;
+        Bounds m_sceneBounds;
+        static constexpr UINT kShadowMapSize = 2048;
         ComPtr<ID3D12DescriptorHeap> m_srvHeap;
         ComPtr<ID3D12DescriptorHeap> m_uiHeap;
         std::function<void()> m_uiCallback;

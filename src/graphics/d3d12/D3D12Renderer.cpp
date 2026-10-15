@@ -26,10 +26,13 @@ namespace r4d::d3d12
         struct FrameConstants
         {
             Mat4 viewProjection;
+            Mat4 lightViewProjection;
             Vec3 cameraPosition;
             float timeSeconds;
             Vec3 ambient;
             float exposure;
+            float shadowTexelSize;
+            float shadowPadding[3];
             Light lights[kLightCount];
         };
 
@@ -44,8 +47,8 @@ namespace r4d::d3d12
 
         // Each material owns a contiguous triple of SRVs: base colour,
         // metallic-roughness, normal. Missing maps point at a default texture.
-        // base colour, metallic-roughness, normal, environment, irradiance
-        constexpr UINT kTexturesPerMaterial = 5;
+        // base colour, metallic-roughness, normal, environment, irradiance, shadow
+        constexpr UINT kTexturesPerMaterial = 6;
 
         static_assert(sizeof(MaterialConstants) % sizeof(UINT32) == 0);
         constexpr UINT kMaterialRootConstants = sizeof(MaterialConstants) / sizeof(UINT32);
@@ -211,6 +214,8 @@ namespace r4d::d3d12
 
         m_textures.clear();
         m_srvHeap.Reset();
+        m_shadowPipeline.Reset();
+        m_shadowMap.Reset();
         m_depthBuffer.Reset();
         m_dsvHeap.Reset();
         m_captureReadback.Reset();
@@ -261,6 +266,7 @@ namespace r4d::d3d12
         }
 
         R4D_TRY(createDepthBuffer(m_size));
+        R4D_TRY(createShadowMap());
         R4D_TRY(createFrameResources());
 
         std::filesystem::path shaderDirectory;
@@ -286,6 +292,7 @@ namespace r4d::d3d12
         R4D_INFO("Renderer: shader directory '{}'", shaderDirectory.string());
 
         R4D_TRY(createPipeline(shaderDirectory));
+        R4D_TRY(createShadowPipeline(shaderDirectory));
 
         if (!m_headless)
         {
@@ -398,7 +405,7 @@ namespace r4d::d3d12
 
         D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
         dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-        dsvHeapDesc.NumDescriptors = 1;
+        dsvHeapDesc.NumDescriptors = 2;
         dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
         R4D_HR(m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsvHeap)),
                "ID3D12Device::CreateDescriptorHeap (DSV)");
@@ -438,6 +445,160 @@ namespace r4d::d3d12
         dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
         m_device->CreateDepthStencilView(m_depthBuffer.Get(), &dsvDesc,
                                          m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+        return Status::Ok();
+    }
+
+    Status D3D12Renderer::createShadowMap()
+    {
+        D3D12_RESOURCE_DESC1 desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = kShadowMapSize;
+        desc.Height = kShadowMapSize;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        // Typeless so the same resource can be a depth target and a shader
+        // resource.
+        desc.Format = DXGI_FORMAT_R32_TYPELESS;
+        desc.SampleDesc.Count = 1;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+        D3D12_CLEAR_VALUE clear{};
+        clear.Format = kDepthFormat;
+        clear.DepthStencil.Depth = kClearDepth;
+
+        const auto heap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+        // Created in the layout the frame loop expects to start from, so the
+        // first frame needs no special case.
+        R4D_HR(m_device->CreateCommittedResource3(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                                  D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                                                  &clear, nullptr, 0, nullptr,
+                                                  IID_PPV_ARGS(&m_shadowMap)),
+               "CreateCommittedResource3 (shadow map)");
+        m_shadowMap->SetName(L"Radiance4D Shadow Map");
+
+        D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+        dsv.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+        dsvDesc.Format = kDepthFormat;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        m_device->CreateDepthStencilView(m_shadowMap.Get(), &dsvDesc, dsv);
+        return Status::Ok();
+    }
+
+    Mat4 D3D12Renderer::lightViewProjection() const
+    {
+        // Orthographic box fitted to the scene bounds along the key light.
+        const Vec3 direction = glm::normalize(Vec3{-0.4f, 0.8f, -0.45f});
+        const Vec3 centre = m_sceneBounds.valid() ? m_sceneBounds.centre() : Vec3{0.0f};
+        const float radius = m_sceneBounds.valid() ? std::max(m_sceneBounds.radius(), 0.01f)
+                                                   : 1.0f;
+
+        const Vec3 eye = centre + direction * (radius * 2.0f);
+        const Vec3 up = std::abs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f}
+                                                      : Vec3{0.0f, 1.0f, 0.0f};
+        const Mat4 view = glm::lookAt(eye, centre, up);
+        const Mat4 projection =
+            glm::ortho(-radius, radius, -radius, radius, 0.05f, radius * 4.5f);
+        return projection * view;
+    }
+
+    void D3D12Renderer::renderShadowPass()
+    {
+        if (m_primitives.empty() || !m_shadowPipeline || !m_shadowMap)
+        {
+            return;
+        }
+
+        submitTextureBarrier(
+            m_commandList.Get(),
+            textureBarrier(m_shadowMap.Get(), D3D12_BARRIER_SYNC_NONE,
+                           D3D12_BARRIER_SYNC_DEPTH_STENCIL, D3D12_BARRIER_ACCESS_NO_ACCESS,
+                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE));
+
+        D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+        dsv.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+        m_commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+        m_commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, kClearDepth, 0, 0,
+                                             nullptr);
+
+        D3D12_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(kShadowMapSize),
+                                static_cast<float>(kShadowMapSize), 0.0f, 1.0f};
+        m_commandList->RSSetViewports(1, &viewport);
+        D3D12_RECT scissor{0, 0, static_cast<LONG>(kShadowMapSize),
+                           static_cast<LONG>(kShadowMapSize)};
+        m_commandList->RSSetScissorRects(1, &scissor);
+
+        m_commandList->SetPipelineState(m_shadowPipeline.Get());
+        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+        m_commandList->IASetIndexBuffer(&m_indexBufferView);
+
+        for (const Primitive& primitive : m_primitives)
+        {
+            m_commandList->DrawIndexedInstanced(primitive.indexCount, 1, primitive.firstIndex,
+                                                primitive.vertexOffset, 0);
+        }
+
+        submitTextureBarrier(
+            m_commandList.Get(),
+            textureBarrier(m_shadowMap.Get(), D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+                           D3D12_BARRIER_SYNC_PIXEL_SHADING,
+                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
+                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
+    }
+
+    Status D3D12Renderer::createShadowPipeline(const std::filesystem::path& shaderDirectory)
+    {
+        auto vertexShader = loadShaderBlob(shaderDirectory, "Shadow.vs.dxil");
+        if (!vertexShader)
+        {
+            return vertexShader.error();
+        }
+
+        const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, position),
+             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, normal),
+             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TANGENT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, offsetof(Vertex, tangent),
+             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(Vertex, uv),
+             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+        psoDesc.pRootSignature = m_rootSignature.Get();
+        psoDesc.VS.pShaderBytecode = vertexShader.value().data();
+        psoDesc.VS.BytecodeLength = vertexShader.value().size();
+        psoDesc.BlendState = opaqueBlendDesc();
+        psoDesc.SampleMask = UINT_MAX;
+        psoDesc.RasterizerState = defaultRasterizerDesc();
+        // Constant and slope-scaled bias in the rasteriser rather than only in the
+        // shader, which is what keeps large flat surfaces from acne.
+        psoDesc.RasterizerState.DepthBias = 120;
+        psoDesc.RasterizerState.SlopeScaledDepthBias = 2.0f;
+        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        psoDesc.DepthStencilState.DepthEnable = TRUE;
+        psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        psoDesc.InputLayout.pInputElementDescs = inputLayout;
+        psoDesc.InputLayout.NumElements = static_cast<UINT>(std::size(inputLayout));
+        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        psoDesc.NumRenderTargets = 0;
+        psoDesc.DSVFormat = kDepthFormat;
+        psoDesc.SampleDesc.Count = 1;
+
+        R4D_HR(m_device->CreateGraphicsPipelineState(&psoDesc,
+                                                     IID_PPV_ARGS(&m_shadowPipeline)),
+               "CreateGraphicsPipelineState (shadow)");
+        m_shadowPipeline->SetName(L"Radiance4D Shadow PSO");
         return Status::Ok();
     }
 
@@ -772,7 +933,9 @@ namespace r4d::d3d12
         textureRange.NumDescriptors = kTexturesPerMaterial;
         textureRange.BaseShaderRegister = 0;
         textureRange.RegisterSpace = 0;
-        textureRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+        // Not DATA_STATIC: the shadow map in this range changes layout every
+        // frame, which that flag promises will not happen.
+        textureRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
         textureRange.OffsetInDescriptorsFromTableStart = 0;
 
         rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -780,7 +943,7 @@ namespace r4d::d3d12
         rootParameters[2].DescriptorTable.NumDescriptorRanges = 1;
         rootParameters[2].DescriptorTable.pDescriptorRanges = &textureRange;
 
-        D3D12_STATIC_SAMPLER_DESC samplers[2]{};
+        D3D12_STATIC_SAMPLER_DESC samplers[3]{};
         D3D12_STATIC_SAMPLER_DESC& sampler = samplers[0];
         sampler.Filter = D3D12_FILTER_ANISOTROPIC;
         sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -804,6 +967,20 @@ namespace r4d::d3d12
         environmentSampler.MaxLOD = D3D12_FLOAT32_MAX;
         environmentSampler.ShaderRegister = 1;
         environmentSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        D3D12_STATIC_SAMPLER_DESC& shadowSampler = samplers[2];
+        shadowSampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+        shadowSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+        shadowSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+        shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+        shadowSampler.MaxAnisotropy = 1;
+        shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        // White border: anything outside the map is lit, not shadowed.
+        shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+        shadowSampler.MinLOD = 0.0f;
+        shadowSampler.MaxLOD = D3D12_FLOAT32_MAX;
+        shadowSampler.ShaderRegister = 2;
+        shadowSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
         rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
@@ -1060,11 +1237,23 @@ namespace r4d::d3d12
             handle.ptr += m_srvDescriptorSize;
         };
 
+        // The shadow map is typeless, so it needs its own view description.
+        const auto writeShadowSrv = [&]() {
+            D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+            srv.Format = DXGI_FORMAT_R32_FLOAT;
+            srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srv.Texture2D.MipLevels = 1;
+            m_device->CreateShaderResourceView(m_shadowMap.Get(), &srv, handle);
+            handle.ptr += m_srvDescriptorSize;
+        };
+
         writeSrv(whiteSrgb.value().Get());
         writeSrv(whiteLinear.value().Get());
         writeSrv(normalDefault.value().Get());
         writeSrv(sky.value().Get());
         writeSrv(irradiance.value().Get());
+        writeShadowSrv();
 
         for (const Material& material : model.materials)
         {
@@ -1081,6 +1270,7 @@ namespace r4d::d3d12
             writeSrv(pick(material.normalTexture, normalDefault.value().Get()));
             writeSrv(sky.value().Get());
             writeSrv(irradiance.value().Get());
+            writeShadowSrv();
         }
 
         R4D_INFO("Textures: {} uploaded, {} descriptors", model.textures.size(),
@@ -1197,6 +1387,7 @@ namespace r4d::d3d12
 
         m_primitives = model.primitives;
         m_materials = model.materials;
+        m_sceneBounds = model.bounds;
 
         R4D_TRY(uploadTextures(model));
 
@@ -1290,6 +1481,8 @@ namespace r4d::d3d12
         {
             FrameConstants constants{};
             constants.viewProjection = m_camera.projection * m_camera.view;
+            constants.lightViewProjection = lightViewProjection();
+            constants.shadowTexelSize = 1.0f / static_cast<float>(kShadowMapSize);
             constants.cameraPosition = m_camera.position;
             constants.timeSeconds = timeSeconds;
             constants.ambient = Vec3{m_settings.ambientIntensity, m_settings.ambientIntensity,
@@ -1315,6 +1508,17 @@ namespace r4d::d3d12
                "ID3D12GraphicsCommandList::Reset");
 
         m_profiler.beginFrame(m_commandList.Get(), frameIndex);
+
+        m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+        if (m_srvHeap)
+        {
+            ID3D12DescriptorHeap* shadowHeaps[] = {m_srvHeap.Get()};
+            m_commandList->SetDescriptorHeaps(1, shadowHeaps);
+        }
+        m_commandList->SetGraphicsRootConstantBufferView(
+            0, frame.constantBuffer->GetGPUVirtualAddress());
+        renderShadowPass();
+        m_commandList->SetPipelineState(m_pipelineState.Get());
 
         ID3D12Resource* renderTarget = currentRenderTarget(backBufferIndex);
 

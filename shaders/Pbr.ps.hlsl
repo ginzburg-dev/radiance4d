@@ -12,10 +12,12 @@ Texture2D g_metallicRoughness : register(t1);
 Texture2D g_normal            : register(t2);
 Texture2D g_environment       : register(t3);
 Texture2D g_irradiance        : register(t4);
+Texture2D<float> g_shadowMap  : register(t5);
 SamplerState g_sampler        : register(s0);
 // Plain linear, wrap in u and clamp in v: anisotropy with an explicit LOD is
 // implementation-defined, and wrapping v would bleed across the poles.
 SamplerState g_environmentSampler : register(s1);
+SamplerComparisonState g_shadowSampler : register(s2);
 
 struct PSInput
 {
@@ -60,6 +62,45 @@ float3 environmentBRDF(float3 f0, float roughness, float nDotV)
     const float a004 = min(r.x * r.x, exp2(-9.28f * nDotV)) * r.x + r.y;
     const float2 ab = float2(-1.04f, 1.04f) * a004 + r.zw;
     return f0 * ab.x + ab.y;
+}
+
+// 3x3 PCF. The key light is the only shadow caster.
+float shadowFactor(float3 worldPosition, float nDotL)
+{
+    const float4 lightClip = mul(g_frame.lightViewProjection, float4(worldPosition, 1.0f));
+    if (lightClip.w <= 0.0f)
+    {
+        return 1.0f;
+    }
+
+    float3 projected = lightClip.xyz / lightClip.w;
+#ifdef R4D_VULKAN_TARGET
+    // Vulkan maps y = -1 to the top of the framebuffer, D3D maps y = +1 there.
+    float2 uv = projected.xy * float2(0.5f, 0.5f) + 0.5f;
+#else
+    float2 uv = projected.xy * float2(0.5f, -0.5f) + 0.5f;
+#endif
+    if (any(uv < 0.0f) || any(uv > 1.0f) || projected.z > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    // Slope-scaled bias: grazing surfaces need more, or they self-shadow.
+    const float bias = lerp(0.0015f, 0.0001f, saturate(nDotL));
+    const float depth = projected.z - bias;
+
+    float sum = 0.0f;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            const float2 offset = float2(x, y) * g_frame.shadowTexelSize;
+            sum += g_shadowMap.SampleCmpLevelZero(g_shadowSampler, uv + offset, depth);
+        }
+    }
+    return sum / 9.0f;
 }
 
 float2 directionToEquirect(float3 d)
@@ -127,8 +168,11 @@ float4 main(PSInput input) : SV_Target0
         const float3 specular = d * vis * f;
         const float3 diffuse = (1.0f - f) * diffuseColour / kPi;
 
+        // Only the key light casts; a second shadow map is not worth it here.
+        const float shadow = (i == 0) ? shadowFactor(input.worldPosition, nDotL) : 1.0f;
+
         radiance += (diffuse + specular) * g_frame.lights[i].colour *
-                    g_frame.lights[i].intensity * nDotL;
+                    g_frame.lights[i].intensity * nDotL * shadow;
     }
 
     // Image-based lighting from an equirectangular sky: the convolved irradiance

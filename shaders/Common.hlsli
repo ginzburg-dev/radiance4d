@@ -19,10 +19,13 @@ struct Light
 struct FrameConstants
 {
     float4x4 viewProjection;
+    float4x4 lightViewProjection;
     float3   cameraPosition;
     float    timeSeconds;
     float3   ambient;
     float    exposure;
+    float    shadowTexelSize;
+    float3   shadowPadding;
     Light    lights[R4D_LIGHT_COUNT];
 };
 

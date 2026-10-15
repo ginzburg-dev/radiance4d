@@ -110,6 +110,24 @@ integrated GPU enumerates first, and an empty selector takes the first discrete 
 Validation messages go through `VK_EXT_debug_utils` into the same counting sink as the D3D12 debug
 layer, so `validationErrorCount()` means the same thing on both backends.
 
+## Shadows
+
+A single 2048x2048 shadow map for the key light, with an orthographic frustum
+fitted to the scene bounds and 3x3 PCF. Only the key light casts; a second map
+was not worth the cost here.
+
+Bias is applied twice, because one place is not enough: constant and slope-scaled
+bias in the rasteriser stops acne on large flat surfaces, and a smaller
+normal-dependent bias in the shader handles grazing angles. Lookups outside the
+map return lit rather than shadowed, through a white border colour.
+
+The shadow vertex shader is deliberately excluded from `-fvk-invert-y`. Its output
+is never presented, only sampled through explicit UV maths, so it keeps native
+clip space on both APIs and the pixel shader compensates for the one place they
+differ: Vulkan maps y = -1 to the top of the framebuffer where D3D maps y = +1
+there. The parity test covers this; a wrong sign there would mirror Vulkan
+shadows and fail loudly.
+
 ## Image-based lighting
 
 An equirectangular sky is generated procedurally on the CPU at load, together with

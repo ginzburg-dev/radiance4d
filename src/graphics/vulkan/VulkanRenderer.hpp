@@ -93,6 +93,10 @@ namespace r4d::vulkan
         Status createSwapchain(UVec2 size);
         void destroySwapchain();
         Status createDepthImage(UVec2 size);
+        Status createShadowMap();
+        Status createShadowPipeline(const std::filesystem::path& shaderDirectory);
+        void renderShadowPass(VkCommandBuffer commandBuffer);
+        Mat4 lightViewProjection() const;
         Status createOffscreenTarget(UVec2 size);
         Status createFrameResources();
         Status createDescriptorLayout();
@@ -135,6 +139,12 @@ namespace r4d::vulkan
 
         Image m_offscreen;
         Image m_depth;
+        Image m_shadowMap;
+        VkPipeline m_shadowPipeline = VK_NULL_HANDLE;
+        VkSampler m_shadowSampler = VK_NULL_HANDLE;
+        Bounds m_sceneBounds;
+        static constexpr std::uint32_t kShadowMapSize = 2048;
+        bool m_shadowMapInitialised = false;
 
         std::array<Frame, kFramesInFlight> m_frames{};
         VkCommandPool m_uploadPool = VK_NULL_HANDLE;

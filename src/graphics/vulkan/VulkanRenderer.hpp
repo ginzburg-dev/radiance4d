@@ -80,7 +80,6 @@ namespace r4d::vulkan
             VkCommandPool commandPool = VK_NULL_HANDLE;
             VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
             VkSemaphore acquired = VK_NULL_HANDLE;
-            VkSemaphore rendered = VK_NULL_HANDLE;
             VkFence inFlight = VK_NULL_HANDLE;
         };
 
@@ -123,6 +122,10 @@ namespace r4d::vulkan
         VkFormat m_swapchainFormat = kColourFormat;
         std::vector<VkImage> m_swapchainImages;
         std::vector<VkImageView> m_swapchainViews;
+        // Signalled per swapchain IMAGE, not per frame in flight: presentation
+        // completion follows the image, and with more images than frame slots a
+        // per-slot semaphore can still be in use by an earlier present.
+        std::vector<VkSemaphore> m_renderFinished;
         std::uint32_t m_imageIndex = 0;
 
         Image m_offscreen;

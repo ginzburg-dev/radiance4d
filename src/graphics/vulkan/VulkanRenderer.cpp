@@ -277,6 +277,15 @@ namespace r4d::vulkan
                    "vkCreateImageView (swapchain)");
         }
 
+        m_renderFinished.resize(count);
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+            R4D_VK(vkCreateSemaphore(m_context.device, &semaphoreInfo, nullptr,
+                                     &m_renderFinished[i]),
+                   "vkCreateSemaphore (render finished)");
+        }
+
         m_size = UVec2{extent.width, extent.height};
         R4D_INFO("Swapchain: {}x{}, {} images, present mode {}", m_size.x, m_size.y, count,
                  static_cast<int>(presentMode));
@@ -285,6 +294,12 @@ namespace r4d::vulkan
 
     void VulkanRenderer::destroySwapchain()
     {
+        for (VkSemaphore semaphore : m_renderFinished)
+        {
+            vkDestroySemaphore(m_context.device, semaphore, nullptr);
+        }
+        m_renderFinished.clear();
+
         for (VkImageView view : m_swapchainViews)
         {
             vkDestroyImageView(m_context.device, view, nullptr);
@@ -351,8 +366,6 @@ namespace r4d::vulkan
             VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             R4D_VK(vkCreateSemaphore(m_context.device, &semaphoreInfo, nullptr, &frame.acquired),
                    "vkCreateSemaphore (acquired)");
-            R4D_VK(vkCreateSemaphore(m_context.device, &semaphoreInfo, nullptr, &frame.rendered),
-                   "vkCreateSemaphore (rendered)");
 
             VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -1292,7 +1305,8 @@ namespace r4d::vulkan
         waitInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 
         VkSemaphoreSubmitInfo signalInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
-        signalInfo.semaphore = frame.rendered;
+        signalInfo.semaphore =
+            m_headless ? VK_NULL_HANDLE : m_renderFinished[m_imageIndex];
         signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 
         VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
@@ -1312,7 +1326,7 @@ namespace r4d::vulkan
         {
             VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
             present.waitSemaphoreCount = 1;
-            present.pWaitSemaphores = &frame.rendered;
+            present.pWaitSemaphores = &m_renderFinished[m_imageIndex];
             present.swapchainCount = 1;
             present.pSwapchains = &m_swapchain;
             present.pImageIndices = &m_imageIndex;
@@ -1512,8 +1526,6 @@ namespace r4d::vulkan
                     vkDestroyFence(m_context.device, frame.inFlight, nullptr);
                 if (frame.acquired != VK_NULL_HANDLE)
                     vkDestroySemaphore(m_context.device, frame.acquired, nullptr);
-                if (frame.rendered != VK_NULL_HANDLE)
-                    vkDestroySemaphore(m_context.device, frame.rendered, nullptr);
                 if (frame.commandPool != VK_NULL_HANDLE)
                     vkDestroyCommandPool(m_context.device, frame.commandPool, nullptr);
             }

@@ -34,7 +34,7 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 | Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
 | Cross-API image parity test | working |
 | 3D Gaussian Splatting (projection, sorting, compositing) | working (both backends) |
-| 3DGS `.ply` dataset loading | working (verified on the INRIA `train` scene, 1.03M splats) |
+| 3DGS `.ply` dataset loading | working (verified on the INRIA `train` and `truck` scenes, 1.03M and 2.54M splats) |
 | Spherical-harmonic colour (degree 3) | working (both backends) |
 | Splat GPU depth sorting | working (compute radix sort, both backends) |
 | Splat visibility culling, tiled binning | planned (M4) |
@@ -135,10 +135,28 @@ image-down axis of its 301 cameras gives a world direction 4.7° off +y, with 29
   Across the splats themselves the colour moves a median 0.19 in 0..1 units over ten view
   directions, against a median degree-0 contribution of 0.28.
 
+**A second scene, 2.5x the size.** INRIA 3DGS pre-trained `truck`, same release and the same
+`point_cloud/iteration_30000/point_cloud.ply`: 2,541,226 splats, 62 properties, SH degree 3, 601 MiB
+on disk, 581.6 MiB of GPU attributes and 96.9 MiB of sort scratch across both frames in flight.
+
+- Zero validation errors on both backends, Debug with the debug layer and the validation layer on,
+  and the D3D12 live-object report is empty.
+- Parse and convert 1.17 s, upload 0.15 s (RelWithDebInfo, warm file cache), against 0.47 s and
+  0.07 s for `train` on the same build — 2.48x and 2.32x the time for 2.48x the splats, so loading
+  is linear in the splat count.
+- Nothing degrades with the size. 678.5 MiB of splat buffers against 15.80 GiB of adapter memory,
+  and a procedural 4M-splat cloud (915 MiB of attributes, 152 MiB of scratch) runs on both backends
+  as well.
+- The capture is a featureless white field, which is the Jacobian defect below and not something the
+  larger scene introduced. Both the parity figure and the frame times have to be read with that in
+  mind, and both are given below with and without a clamp applied as a probe.
+
 Current limits: one draw call per cloud with no visibility culling or tiled binning, and 240 bytes
 of attributes per splat (degree-3 SH is 192 of them), which is 240 MB for a million-splat scene --
 of which the sort reads only the 12 bytes of position. The sort itself adds 39.2 MiB of scratch at
-1.03M splats, across both frames in flight.
+1.03M splats and 96.9 MiB at `truck`'s 2.54M, across both frames in flight. Both are linear in the
+splat count, so the 6.13M-splat `bicycle` scene would want about 1.4 GiB of attributes and 233 MiB
+of scratch.
 
 A splat cloud is no longer framed on its bounding sphere. A reconstruction leaves sparse
 low-opacity splats far outside the subject, so that sphere is dominated by outliers: in `train` it
@@ -152,6 +170,16 @@ The dataset's own capture poses say that is the right place to stand: the 301 ca
 `cameras.json` sit a median 3.42 and at most 7.35 units from the scene centre, and the median splat
 position lands 0.07 units from the median of those camera positions.
 
+That agreement does not generalise, and `truck` is where it breaks. Its 251 capture cameras stand a
+median 4.12 and at most 6.40 units from the scene centre, but half its splats lie 12.5 units or
+further out — it reconstructs a large surrounding background rather than a subject on a plinth —
+so the framing sphere comes out at radius 12.6 and the camera 28 units back, four times beyond the
+furthest camera that ever photographed it. That is still far better than the bounding sphere, which
+has radius 111.6 and would put the camera 251 units back, but "the distance half the splats are
+within" turns out to measure how much background a scene reconstructed rather than where it was shot
+from. Checking the framing radius against the dataset's own `cameras.json` is the part worth
+keeping; a heuristic that reads the capture poses when a dataset ships them would be better still.
+
 There is still no dataset screenshot here, for two reasons that framing does not reach. The
 projection's Jacobian is not clamped to the frustum the way the reference implementation clamps it,
 so once the camera is close enough to be inside the reconstruction, off-axis splats acquire a
@@ -159,6 +187,17 @@ covariance that smears them across the whole frame and the capture is a white wa
 projection defect, measured and written up, not a framing one. And the orbit camera always starts
 at yaw 0, which for `train` looks into foliage. With both addressed the scene does resolve — two
 locomotives, lettering, ballast and the hillside behind — but neither is fixed on `main` yet.
+
+`truck` hits the same defect, and harder. At its framing camera every pixel of the 1280x720 capture
+lands between 253 and 255 on all three channels: 100% of pixels at or above 250, standard deviation
+under 1.1, no structure at all. Applying the clamp as a local probe on the same build renders the
+scene instead — foliage, the red truck, the ground behind it — with values spread over 0..255 and
+only 0.37% of pixels near white. The probe was measured and reverted, not committed here.
+
+That is what the parity figure turns on. Measured on the washed-out image, D3D12 against Vulkan on
+`truck` gives max channel delta 1, RMSE 0.0079, 74 of 921,600 pixels, which is two featureless
+fields agreeing and says nothing. Measured with the clamp, the same comparison is max channel
+delta 2, RMSE 0.0380, 3,360 pixels, and that is the honest parity statement for this scene.
 
 ## Measurements
 

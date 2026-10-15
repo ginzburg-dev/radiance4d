@@ -128,6 +128,28 @@ within 0.062 ms, so that is work removed and not a clock artefact.
 What remains in the frame is the draw itself: one undivided draw call, no visibility culling, no
 tiled binning.
 
+A second published scene has been through the same path to see how it scales: INRIA's `truck`,
+2,541,226 splats at SH degree 3, 581.6 MiB of GPU attributes and 96.9 MiB of sort scratch, zero
+validation errors on both backends. Parse and convert takes 1.17 s and the upload 0.15 s, 2.48x and
+2.32x `train` for 2.48x the splats, so loading and memory are both linear. Nothing degrades: a
+procedural 4M-splat cloud (915.5 MiB of attributes, 152.6 MiB of scratch) also runs clean on both
+backends.
+
+The frame time does not scale with the splat count, and that is the useful result. At 1920x1080
+`truck` costs 14.698 ms of GPU against `train`'s 22.050 ms on D3D12 — 2.5x the splats, two thirds
+of the frame — because the frame is bounded by rasterised area rather than by per-splat work. CPU
+stays within 0.03 ms of GPU on both backends, so nothing has moved back onto the CPU. Shrinking the
+target to 160x90 to strip the fill leaves the view-independent half: D3D12 goes 2.472 ms to 6.123 ms
+for the 2.476x splat count, linear to within 0.1%, while Vulkan goes 2.182 ms to 7.217 ms. A
+procedural sweep holding the data fixed confirms it: Vulkan is the cheaper backend to a little over
+2M splats and the dearer one above that, and from 1M to 4M it rises 4.40x against D3D12's 3.87x.
+Which pass accounts for that is not separable without per-pass timing, which the project does not
+have yet.
+
+That makes the ordering of the remaining work concrete. Fill, not splat count, sets the frame, which
+is the argument for tiled binning; and the per-splat half being linear is what says the sort is no
+longer the thing to optimise.
+
 One thing the run exposed that was not on the list above has since been fixed: the viewer framed the
 camera on the cloud's bounding sphere, which a reconstruction's far-flung low-opacity splats stretch
 far past the subject. `GaussianCloud` now carries a framing sphere beside its bounds — the per-axis
@@ -154,6 +176,17 @@ both are now done:
 `docs/images/train-dataset.png` is that capture: 1280x720, Debug, zero validation errors on both
 backends, D3D12 against Vulkan at max channel delta 2 / RMSE 0.0447 over 0.49% of pixels, and
 byte-identical between two runs of the same command.
+
+`truck` reproduces the first of those and adds a third. Its un-clamped capture is a featureless
+white field — every pixel between 253 and 255 on all three channels — so the D3D12-against-Vulkan
+figure measured on it is two blank images agreeing and means nothing; with the clamp applied as a
+probe the scene renders and parity is max channel delta 2, RMSE 0.0380 over 3,360 of 921,600 pixels.
+The third is the framing heuristic itself. `truck`'s 251 capture cameras sit a median 4.12 and at
+most 6.40 units from the centre, but half its splats lie 12.5 units or further out, so the framing
+sphere lands at radius 12.6 and the camera 28 units back — inside the reconstructed background
+rather than where the scene was photographed from. The median distance measures how much background
+a scene reconstructed, not where its cameras stood; reading the capture poses, when a dataset ships
+them, would.
 
 ## M5 — Reconstruction pipeline
 

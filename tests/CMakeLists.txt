@@ -21,6 +21,11 @@ set(R4D_DEVICE_TESTS
     HeadlessRender_test.cpp
 )
 
+# Needs a real GPU: there is no software Vulkan device the way WARP covers D3D12.
+set(R4D_GPU_TESTS
+    BackendParity_test.cpp
+)
+
 function(r4d_add_test test_src needs_device)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})
@@ -37,7 +42,10 @@ function(r4d_add_test test_src needs_device)
     r4d_set_target_defines(${test_name})
     set_target_properties(${test_name} PROPERTIES FOLDER "Tests")
 
-    if(needs_device)
+    if(needs_device STREQUAL "gpu")
+        r4d_configure_runtime(${test_name})
+        set(test_labels "gpu")
+    elseif(needs_device)
         # Agility exports and the staged D3D12/ directory, without which the test
         # would quietly run against the OS runtime and a different WARP.
         r4d_configure_runtime(${test_name})
@@ -56,4 +64,8 @@ endforeach()
 
 foreach(test_src ${R4D_DEVICE_TESTS})
     r4d_add_test(${test_src} TRUE)
+endforeach()
+
+foreach(test_src ${R4D_GPU_TESTS})
+    r4d_add_test(${test_src} "gpu")
 endforeach()

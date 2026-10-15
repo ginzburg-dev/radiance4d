@@ -3,11 +3,11 @@
 Hybrid real-time rendering and spatiotemporal reconstruction engine featuring 3D/4D Gaussian
 Splatting, photogrammetry, ray tracing, and temporal stability.
 
-C++20, built directly on Direct3D 12. Vulkan backend planned.
+C++20, with native Direct3D 12 and Vulkan backends.
 
 ## Status
 
-Milestone M2 complete. Features marked *planned* are not implemented.
+Milestone M3 complete. Features marked *planned* are not implemented.
 
 | Area | Status |
 |---|---|
@@ -28,7 +28,8 @@ Milestone M2 complete. Features marked *planned* are not implemented.
 | PBR shading, analytic lights | working |
 | Base colour, metallic-roughness, normal maps | working |
 | ImGui statistics overlay | working |
-| Vulkan backend | planned (M3) |
+| Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
+| Cross-API image parity test | working |
 | 3D Gaussian Splatting | planned (M4) |
 | COLMAP / gsplat reconstruction | planned (M5) |
 | Hybrid mesh and Gaussian rendering | planned (M6) |
@@ -56,7 +57,7 @@ See [docs/BUILDING.md](docs/BUILDING.md).
 build/windows-d3d12/bin/Debug/radiance4d_viewer.exe
 ```
 
-`--scene <file.gltf>`, `--adapter <index|warp|name>`, `--no-vsync`, `--gpu-validation`,
+`--backend <d3d12|vulkan>`, `--scene <file.gltf>`, `--adapter <index|warp|name>`, `--no-vsync`, `--gpu-validation`,
 `--frames <n>`, `--resize-cycles <n>`, `--log-level <0..5>`. `--help` lists all flags.
 Without `--scene` a built-in material grid is rendered. Esc quits, F1 toggles vsync, F2 switches
 camera mode; left mouse orbits, right pans, wheel zooms, WASDQE moves in free-fly. Exit code is non-zero if the

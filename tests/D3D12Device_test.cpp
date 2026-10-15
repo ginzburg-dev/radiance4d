@@ -113,12 +113,21 @@ TEST_F(WarpDevice, RejectsAnUnknownAdapterInsteadOfFallingBack)
     EXPECT_EQ(renderer.error().code, r4d::ErrorCode::NotFound);
 }
 
-TEST_F(WarpDevice, RejectsTheUnimplementedVulkanBackend)
+TEST_F(WarpDevice, NeverSubstitutesD3D12ForARequestedVulkanBackend)
 {
-    // A fallback would make a Vulkan benchmark secretly a D3D12 one.
-    auto renderer = r4d::createRenderer(r4d::BackendType::Vulkan, warpDesc());
-    ASSERT_FALSE(renderer.ok());
-    EXPECT_EQ(renderer.error().code, r4d::ErrorCode::UnsupportedFeature);
+    // A silent fallback would make a Vulkan benchmark secretly a D3D12 one.
+    // Vulkan has no software device, so this uses the default adapter.
+    auto desc = warpDesc();
+    desc.adapterSelector.clear();
+
+    auto renderer = r4d::createRenderer(r4d::BackendType::Vulkan, desc);
+    if (!renderer)
+    {
+        // Disabled at build time or no suitable device: both are honest failures.
+        EXPECT_NE(renderer.error().code, r4d::ErrorCode::Unknown);
+        return;
+    }
+    EXPECT_EQ(renderer.value()->backend(), r4d::BackendType::Vulkan);
 }
 
 TEST_F(WarpDevice, RejectsAZeroSizedTarget)

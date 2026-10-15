@@ -1,6 +1,6 @@
 # Architecture
 
-State as of milestone M1. See [ROADMAP.md](ROADMAP.md).
+State as of milestone M3. See [ROADMAP.md](ROADMAP.md).
 
 ## Modules
 
@@ -8,7 +8,7 @@ State as of milestone M1. See [ROADMAP.md](ROADMAP.md).
 app/viewer          radiance4d_viewer   no d3d12.h
 include/radiance4d/graphics   r4d_graphics public surface, API-neutral
 src/graphics/d3d12            all d3d12 / dxgi / Agility headers
-src/graphics/vulkan           M3
+src/graphics/vulkan           all vulkan headers
 include/radiance4d/core       r4d_core    platform, no graphics API
 ```
 
@@ -19,8 +19,13 @@ include/radiance4d/core       r4d_core    platform, no graphics API
 | `radiance4d_viewer` | Application, plus the Agility SDK exports |
 
 `r4d::Renderer` is the only polymorphic boundary. There are no cross-API `IBuffer`, `ITexture` or
-`ICommandList` interfaces; the shared abstraction is derived at M3 from two working backends.
-Switching backend recreates the renderer.
+`ICommandList` interfaces. Switching backend recreates the renderer.
+
+With both backends working, that decision held: the resource, descriptor and synchronisation models
+differ enough that a common layer would have obscured more than it shared. D3D12 binds a descriptor
+table per material and pushes material data as root constants; Vulkan binds one descriptor set per
+material with two dynamic uniform offsets. Only frame-constant assembly and the model and stats
+bookkeeping are genuinely duplicated, and that is a smaller cost than the wrong abstraction.
 
 `tests/IncludeHygiene_test.cpp` fails compilation if any public header pulls in `d3d12.h`, a `dxgi`
 header or `windows.h`. `Window` exposes its HWND as `void*`.
@@ -82,6 +87,28 @@ synchronisation. Reported GPU time lags the CPU by `kFramesInFlight` frames.
 
 `GpuStats::gpuTimingsValid` is false until the first resolve; the GPU fields are unset, not zero. If
 the queue reports no timestamp frequency, profiling is disabled.
+
+## Vulkan backend
+
+Vulkan 1.3 with `dynamicRendering` and `synchronization2`, both required at device creation; a device
+that does not report them fails rather than falling back, matching how D3D12 treats Enhanced
+Barriers.
+
+Conventions that had to line up with D3D12:
+
+| Concern | Handling |
+|---|---|
+| Clip space Y | Shaders are compiled with `-fvk-invert-y` (vertex stages only; the flag is illegal elsewhere) |
+| Winding | `VK_FRONT_FACE_CLOCKWISE`, matching `FrontCounterClockwise = FALSE` |
+| Depth range | `[0,1]` on both, already set by `GLM_FORCE_DEPTH_ZERO_TO_ONE` |
+| Register bindings | HLSL register classes all land in set 0 and collide, so `-fvk-b/t/s/u-shift` separates them into 0, 100, 200 and 300 |
+| Material data | Root constants on D3D12, a dynamic uniform buffer offset on Vulkan, so the shader is unchanged |
+
+Physical device selection is explicit for the same reason as the DXGI path: on this machine the Intel
+integrated GPU enumerates first, and an empty selector takes the first discrete device.
+
+Validation messages go through `VK_EXT_debug_utils` into the same counting sink as the D3D12 debug
+layer, so `validationErrorCount()` means the same thing on both backends.
 
 ## Validation
 

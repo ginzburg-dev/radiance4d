@@ -8,7 +8,8 @@
 | Toolchain | Visual Studio 2022, v143 | VS 2022 17.14, MSVC 14.44.35207, cl 19.44.35215 |
 | Windows SDK | 10.0.22621.0+ | 10.0.26100.0 (pinned via `CMAKE_SYSTEM_VERSION`) |
 | CMake | 3.26+ | 3.28.3 |
-| GPU | D3D12 with Enhanced Barriers | RTX 3080 Laptop GPU, driver 617.14 |
+| GPU | D3D12 with Enhanced Barriers; Vulkan 1.3 | RTX 3080 Laptop GPU, driver 617.14 |
+| Vulkan SDK | 1.3+ for the validation layers | 1.4.363.0 |
 
 Only Visual Studio and CMake need installing. The debug layer works without the Graphics Tools
 feature; the Agility SDK supplies its own matching `d3d12SDKLayers.dll`.
@@ -52,7 +53,7 @@ developer command prompt.
 | Option | Default | Meaning |
 |---|---|---|
 | `R4D_ENABLE_D3D12` | ON | D3D12 backend |
-| `R4D_ENABLE_VULKAN` | OFF | M3; turning it on is a configure error |
+| `R4D_ENABLE_VULKAN` | ON | Needs the LunarG SDK; CI builds with it OFF |
 | `R4D_ENABLE_AGILITY_SDK` | ON | Use the redistributable runtime |
 | `R4D_BUILD_TESTS` | ON | Build and register tests |
 | `R4D_WARNINGS_AS_ERRORS` | ON | `/WX` on first-party targets only |
@@ -62,7 +63,8 @@ developer command prompt.
 
 | Flag | Meaning |
 |---|---|
-| `--adapter <sel>` | Empty picks the fastest hardware adapter; also `warp`, an index, or part of a name |
+| `--backend <d3d12\|vulkan>` | Graphics API, default d3d12 |
+| `--adapter <sel>` | Empty picks the fastest hardware adapter; also `warp` (D3D12 only), an index, or part of a name |
 | `--width <n>` `--height <n>` | Initial client size |
 | `--vsync` / `--no-vsync` | Present interval |
 | `--debug` / `--no-debug` | Debug layer, on by default |

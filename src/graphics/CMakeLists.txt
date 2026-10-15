@@ -52,6 +52,20 @@ if(R4D_ENABLE_D3D12)
     endif()
 endif()
 
+if(R4D_ENABLE_VULKAN)
+    target_sources(r4d_graphics PRIVATE
+        vulkan/VulkanRenderer.cpp
+        vulkan/VulkanDevice.cpp
+    )
+    target_include_directories(r4d_graphics PRIVATE "${R4D_VULKAN_INCLUDE_DIR}")
+    target_link_libraries(r4d_graphics PRIVATE "${R4D_VULKAN_LIBRARY}")
+    target_compile_definitions(r4d_graphics PRIVATE
+        R4D_ENABLE_VULKAN=1
+        R4D_VK_T_SHIFT=${R4D_VK_T_SHIFT}
+        R4D_VK_S_SHIFT=${R4D_VK_S_SHIFT}
+    )
+endif()
+
 r4d_set_target_warnings(r4d_graphics)
 r4d_set_target_defines(r4d_graphics)
 set_target_properties(r4d_graphics PROPERTIES FOLDER "Engine")

@@ -1,6 +1,6 @@
 # Roadmap
 
-Each milestone is independently verifiable. Current position: M2 complete, M3 next.
+Each milestone is independently verifiable. Current position: M3 complete, showcase polish next.
 
 ## M0 — Environment and architecture
 
@@ -46,9 +46,26 @@ Not implemented: image-based lighting, shadows, transparency sorting, texture co
 
 ## M3 — Vulkan backend
 
-Equivalent rendering through Vulkan, validated against D3D12. The cross-API abstraction is derived
-here, from two working backends. Shaders gain a SPIR-V target through the same DXC. Automated image
-comparison between backends with stated tolerances. Requires the Vulkan SDK.
+Native Vulkan 1.3 backend using dynamic rendering and synchronization2, selected at runtime with
+`--backend vulkan`. Shaders reach SPIR-V through the same vendored DXC, so one compiler serves both
+APIs.
+
+Measured on an RTX 3080 Laptop GPU, the two backends agree to **max channel delta 1, RMSE 0.0018,
+one differing pixel in 230400**. `BackendParity_test` asserts this automatically with a wider
+allowance (delta 4, RMSE 0.5, 0.1% of pixels) so a driver revision does not fail the build.
+
+The test is labelled `gpu` and excluded in CI: unlike D3D12 with WARP, there is no software Vulkan
+device on the runner. CI builds D3D12 only, since the runner has no Vulkan SDK.
+
+No shared cross-API abstraction was extracted. With both backends working, the only duplication that
+turned out to be real is frame-constant assembly and the model/stats bookkeeping; the resource,
+descriptor and synchronisation models differ enough that a common layer would have obscured more
+than it shared. `Renderer` remains the single seam.
+
+## Showcase polish (next)
+
+Image-based lighting, shadows, a licensed glTF scene, GPU profiling with a real tool, screenshots
+and a demo video.
 
 ## M4 — Static Gaussian splatting
 

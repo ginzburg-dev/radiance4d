@@ -13,6 +13,13 @@ namespace r4d
     }
 #endif
 
+#if R4D_ENABLE_VULKAN
+    namespace vulkan
+    {
+        Result<std::unique_ptr<Renderer>> createRenderer(const RendererDesc& desc);
+    }
+#endif
+
     Result<std::unique_ptr<Renderer>> createRenderer(BackendType backend,
                                                      const RendererDesc& desc)
     {
@@ -30,10 +37,14 @@ namespace r4d
 #endif
 
             case BackendType::Vulkan:
+#if R4D_ENABLE_VULKAN
+                return vulkan::createRenderer(desc);
+#else
                 // A hard failure, not a fallback.
                 return makeError(ErrorCode::UnsupportedFeature,
-                                 "the Vulkan backend is planned for M3 and is not "
-                                 "implemented yet");
+                                 "the Vulkan backend was disabled at build time "
+                                 "(R4D_ENABLE_VULKAN=OFF)");
+#endif
         }
 
         return makeError(ErrorCode::InvalidArgument, "unknown backend type");

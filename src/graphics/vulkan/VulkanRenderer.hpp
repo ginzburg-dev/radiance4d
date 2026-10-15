@@ -102,6 +102,11 @@ namespace r4d::vulkan
         Status createFrameResources();
         Status createDescriptorLayout();
         Status createPipeline(const std::filesystem::path& shaderDirectory);
+        Status createSplatPipeline(const std::filesystem::path& shaderDirectory);
+        Status createSplatDescriptors();
+        void destroySplatBuffers();
+        void renderSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex,
+                          std::uint32_t& drawCalls, std::uint32_t& triangles);
         Status createDescriptorSets(const Model& model);
         Status createTimestampPool();
         Status initialiseUi(void* windowHandle);
@@ -161,6 +166,21 @@ namespace r4d::vulkan
 
         VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_pipeline = VK_NULL_HANDLE;
+
+        // The splat pass reads two buffers where the mesh layout has textures, so
+        // it takes a set layout of its own rather than another binding in set 0.
+        VkDescriptorSetLayout m_splatSetLayout = VK_NULL_HANDLE;
+        VkPipelineLayout m_splatPipelineLayout = VK_NULL_HANDLE;
+        VkPipeline m_splatPipeline = VK_NULL_HANDLE;
+        VkDescriptorPool m_splatDescriptorPool = VK_NULL_HANDLE;
+        std::array<VkDescriptorSet, kFramesInFlight> m_splatSets{};
+        Buffer m_gaussianBuffer;
+        // One per frame in flight: the depth order is rewritten every frame.
+        std::array<Buffer, kFramesInFlight> m_gaussianOrder{};
+        std::vector<Vec3> m_gaussianPositions;
+        std::vector<std::uint32_t> m_gaussianSorted;
+        std::vector<float> m_gaussianDepths;
+        std::uint32_t m_gaussianCount = 0;
 
         Buffer m_vertexBuffer;
         Buffer m_indexBuffer;

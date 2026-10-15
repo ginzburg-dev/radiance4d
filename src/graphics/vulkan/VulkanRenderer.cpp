@@ -64,6 +64,14 @@ namespace r4d::vulkan
         // base colour, metallic-roughness, normal, environment, irradiance, shadow
         constexpr std::uint32_t kTexturesPerMaterial = 6;
 
+        // The splat shader's t0 and t1, moved by the same shift.
+        constexpr std::uint32_t kGaussianBinding = R4D_VK_T_SHIFT;
+        constexpr std::uint32_t kGaussianOrderBinding = R4D_VK_T_SHIFT + 1;
+
+        // Closer than this the Jacobian is meaningless, so the splat is dropped.
+        // Must match the D3D12 backend.
+        constexpr float kSplatNearPlane = 0.05f;
+
         VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment)
         {
             return alignment == 0 ? value : (value + alignment - 1) & ~(alignment - 1);
@@ -167,6 +175,7 @@ namespace r4d::vulkan
         R4D_INFO("Renderer: shader directory '{}'", shaderDirectory.string());
         R4D_TRY(createPipeline(shaderDirectory));
         R4D_TRY(createShadowPipeline(shaderDirectory));
+        R4D_TRY(createSplatPipeline(shaderDirectory));
 
         if (!m_headless)
         {
@@ -980,6 +989,146 @@ namespace r4d::vulkan
         return Status::Ok();
     }
 
+    Status VulkanRenderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
+    {
+        const VkDescriptorSetLayoutBinding bindings[] = {
+            // Dynamic, so one set per frame slot still indexes the shared buffer.
+            {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT,
+             nullptr},
+            {kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+             VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+            {kGaussianOrderBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+             VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+        };
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        layoutInfo.bindingCount = static_cast<std::uint32_t>(std::size(bindings));
+        layoutInfo.pBindings = bindings;
+        R4D_VK(vkCreateDescriptorSetLayout(m_context.device, &layoutInfo, nullptr,
+                                           &m_splatSetLayout),
+               "vkCreateDescriptorSetLayout (splat)");
+
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{
+            VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &m_splatSetLayout;
+        R4D_VK(vkCreatePipelineLayout(m_context.device, &pipelineLayoutInfo, nullptr,
+                                      &m_splatPipelineLayout),
+               "vkCreatePipelineLayout (splat)");
+
+        auto vertexModule = loadShaderModule(shaderDirectory, "Splat.vs.spv");
+        if (!vertexModule)
+        {
+            return vertexModule.error();
+        }
+        auto fragmentModule = loadShaderModule(shaderDirectory, "Splat.ps.spv");
+        if (!fragmentModule)
+        {
+            vkDestroyShaderModule(m_context.device, vertexModule.value(), nullptr);
+            return fragmentModule.error();
+        }
+
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        stages[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        stages[0].module = vertexModule.value();
+        stages[0].pName = "main";
+        stages[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        stages[1].module = fragmentModule.value();
+        stages[1].pName = "main";
+
+        // The quad comes from the vertex index, so there is nothing to fetch.
+        VkPipelineVertexInputStateCreateInfo vertexInput{
+            VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{
+            VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+
+        VkPipelineViewportStateCreateInfo viewportState{
+            VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo raster{
+            VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+        raster.polygonMode = VK_POLYGON_MODE_FILL;
+        // The quad's winding is not fixed, so nothing may be culled.
+        raster.cullMode = VK_CULL_MODE_NONE;
+        raster.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        raster.lineWidth = 1.0f;
+
+        VkPipelineMultisampleStateCreateInfo multisample{
+            VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+        multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        // Tested against the mesh depth, never written: the splats order
+        // themselves by the draw order instead.
+        VkPipelineDepthStencilStateCreateInfo depthStencil{
+            VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_FALSE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+        // Premultiplied alpha, which is what the pixel shader emits.
+        VkPipelineColorBlendAttachmentState blendAttachment{};
+        blendAttachment.blendEnable = VK_TRUE;
+        blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+        VkPipelineColorBlendStateCreateInfo blend{
+            VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+        blend.attachmentCount = 1;
+        blend.pAttachments = &blendAttachment;
+
+        const VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                                VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dynamic{
+            VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+        dynamic.dynamicStateCount = static_cast<std::uint32_t>(std::size(dynamicStates));
+        dynamic.pDynamicStates = dynamicStates;
+
+        const VkFormat colourFormat = m_headless ? kColourFormat : m_swapchainFormat;
+        VkPipelineRenderingCreateInfo rendering{
+            VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+        rendering.colorAttachmentCount = 1;
+        rendering.pColorAttachmentFormats = &colourFormat;
+        rendering.depthAttachmentFormat = kDepthFormat;
+
+        VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        info.pNext = &rendering;
+        info.stageCount = 2;
+        info.pStages = stages;
+        info.pVertexInputState = &vertexInput;
+        info.pInputAssemblyState = &inputAssembly;
+        info.pViewportState = &viewportState;
+        info.pRasterizationState = &raster;
+        info.pMultisampleState = &multisample;
+        info.pDepthStencilState = &depthStencil;
+        info.pColorBlendState = &blend;
+        info.pDynamicState = &dynamic;
+        info.layout = m_splatPipelineLayout;
+
+        const VkResult result = vkCreateGraphicsPipelines(m_context.device, VK_NULL_HANDLE, 1,
+                                                          &info, nullptr, &m_splatPipeline);
+        vkDestroyShaderModule(m_context.device, vertexModule.value(), nullptr);
+        vkDestroyShaderModule(m_context.device, fragmentModule.value(), nullptr);
+        if (result != VK_SUCCESS)
+        {
+            return vulkanError(ErrorCode::ApiCallFailed, result,
+                               "vkCreateGraphicsPipelines (splat)");
+        }
+        return Status::Ok();
+    }
+
     Result<VulkanRenderer::Buffer> VulkanRenderer::createBuffer(
         VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
         const char* name)
@@ -1214,16 +1363,210 @@ namespace r4d::vulkan
         return image.value();
     }
 
+    void VulkanRenderer::destroySplatBuffers()
+    {
+        if (m_splatDescriptorPool != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorPool(m_context.device, m_splatDescriptorPool, nullptr);
+            m_splatDescriptorPool = VK_NULL_HANDLE;
+            m_splatSets = {};
+        }
+        destroyBuffer(m_gaussianBuffer);
+        for (Buffer& order : m_gaussianOrder)
+        {
+            destroyBuffer(order);
+        }
+    }
+
     Status VulkanRenderer::uploadGaussians(const GaussianCloud& cloud)
     {
+        waitForGpuIdle();
+        destroySplatBuffers();
+        m_gaussianPositions.clear();
+        m_gaussianSorted.clear();
+        m_gaussianDepths.clear();
+        m_gaussianCount = 0;
+
         if (cloud.empty())
         {
             return Status::Ok();
         }
-        // The splat pass lands on D3D12 first; porting it is the next step,
-        // and silently dropping the cloud would look like a renderer bug.
-        return makeError(ErrorCode::UnsupportedFeature,
-                         "the Vulkan backend has no splat pass yet; use --backend d3d12");
+
+        const auto count = static_cast<std::uint32_t>(cloud.count());
+        const VkDeviceSize splatBytes = static_cast<VkDeviceSize>(count) * sizeof(Gaussian);
+
+        auto gaussianBuffer = createBuffer(splatBytes,
+                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                               VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                           "gaussian buffer");
+        if (!gaussianBuffer)
+        {
+            return gaussianBuffer.error();
+        }
+        m_gaussianBuffer = gaussianBuffer.value();
+
+        auto staging = createBuffer(splatBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                    "gaussian staging");
+        if (!staging)
+        {
+            return staging.error();
+        }
+        std::memcpy(staging.value().mapped, cloud.gaussians.data(),
+                    static_cast<std::size_t>(splatBytes));
+
+        auto commandBuffer = beginOneShot(m_uploadPool);
+        if (!commandBuffer)
+        {
+            return commandBuffer.error();
+        }
+
+        VkBufferCopy copy{0, 0, splatBytes};
+        vkCmdCopyBuffer(commandBuffer.value(), staging.value().handle, m_gaussianBuffer.handle,
+                        1, &copy);
+
+        VkBufferMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = m_gaussianBuffer.handle;
+        barrier.size = VK_WHOLE_SIZE;
+
+        VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dependency.bufferMemoryBarrierCount = 1;
+        dependency.pBufferMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(commandBuffer.value(), &dependency);
+
+        R4D_TRY(endOneShot(m_uploadPool, commandBuffer.value()));
+        destroyBuffer(staging.value());
+
+        // The depth order is rewritten every frame, so it stays in host memory
+        // the shader reads directly, one buffer per frame in flight.
+        for (Buffer& order : m_gaussianOrder)
+        {
+            auto buffer = createBuffer(static_cast<VkDeviceSize>(count) *
+                                           sizeof(std::uint32_t),
+                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                       "gaussian order");
+            if (!buffer)
+            {
+                return buffer.error();
+            }
+            order = buffer.value();
+        }
+
+        m_gaussianPositions.reserve(count);
+        for (const Gaussian& g : cloud.gaussians)
+        {
+            m_gaussianPositions.push_back(g.position);
+        }
+        m_gaussianSorted.resize(count);
+        m_gaussianDepths.resize(count);
+        m_gaussianCount = count;
+
+        R4D_TRY(createSplatDescriptors());
+
+        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB)", count,
+                 static_cast<double>(splatBytes) / (1024.0 * 1024.0));
+        return Status::Ok();
+    }
+
+    Status VulkanRenderer::createSplatDescriptors()
+    {
+        const VkDescriptorPoolSize sizes[] = {
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, kFramesInFlight},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight * 2},
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        poolInfo.maxSets = kFramesInFlight;
+        poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
+        poolInfo.pPoolSizes = sizes;
+        R4D_VK(vkCreateDescriptorPool(m_context.device, &poolInfo, nullptr,
+                                      &m_splatDescriptorPool),
+               "vkCreateDescriptorPool (splat)");
+
+        const std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{m_splatSetLayout,
+                                                                         m_splatSetLayout};
+        VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        allocInfo.descriptorPool = m_splatDescriptorPool;
+        allocInfo.descriptorSetCount = kFramesInFlight;
+        allocInfo.pSetLayouts = layouts.data();
+        R4D_VK(vkAllocateDescriptorSets(m_context.device, &allocInfo, m_splatSets.data()),
+               "vkAllocateDescriptorSets (splat)");
+
+        for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
+        {
+            VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0, sizeof(FrameConstants)};
+            VkDescriptorBufferInfo gaussianInfo{m_gaussianBuffer.handle, 0, VK_WHOLE_SIZE};
+            VkDescriptorBufferInfo orderInfo{m_gaussianOrder[i].handle, 0, VK_WHOLE_SIZE};
+
+            VkWriteDescriptorSet writes[3]{};
+            const auto write = [&](std::size_t index, std::uint32_t binding,
+                                   VkDescriptorType type,
+                                   const VkDescriptorBufferInfo* buffer) {
+                writes[index] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                writes[index].dstSet = m_splatSets[i];
+                writes[index].dstBinding = binding;
+                writes[index].descriptorCount = 1;
+                writes[index].descriptorType = type;
+                writes[index].pBufferInfo = buffer;
+            };
+            write(0, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &frameInfo);
+            write(1, kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &gaussianInfo);
+            write(2, kGaussianOrderBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &orderInfo);
+
+            vkUpdateDescriptorSets(m_context.device,
+                                   static_cast<std::uint32_t>(std::size(writes)), writes, 0,
+                                   nullptr);
+        }
+
+        return Status::Ok();
+    }
+
+    void VulkanRenderer::renderSplats(VkCommandBuffer commandBuffer,
+                                      std::uint32_t frameIndex, std::uint32_t& drawCalls,
+                                      std::uint32_t& triangles)
+    {
+        if (m_gaussianCount == 0 || m_splatPipeline == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        // Alpha compositing is order-dependent, so the splats go far to near.
+        // The same full CPU sort as the D3D12 backend, which is what keeps the
+        // two comparable pixel for pixel.
+        const Mat4& view = m_camera.view;
+        for (std::uint32_t i = 0; i < m_gaussianCount; ++i)
+        {
+            const Vec3& p = m_gaussianPositions[i];
+            m_gaussianDepths[i] =
+                view[0][2] * p.x + view[1][2] * p.y + view[2][2] * p.z + view[3][2];
+            m_gaussianSorted[i] = i;
+        }
+        std::sort(m_gaussianSorted.begin(), m_gaussianSorted.end(),
+                  [this](std::uint32_t a, std::uint32_t b) {
+                      return m_gaussianDepths[a] > m_gaussianDepths[b];
+                  });
+        std::memcpy(m_gaussianOrder[frameIndex].mapped, m_gaussianSorted.data(),
+                    m_gaussianCount * sizeof(std::uint32_t));
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_splatPipeline);
+        const std::uint32_t offset = static_cast<std::uint32_t>(frameIndex * m_frameStride);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_splatPipelineLayout, 0, 1, &m_splatSets[frameIndex], 1,
+                                &offset);
+        vkCmdDraw(commandBuffer, 4, m_gaussianCount, 0, 0);
+
+        ++drawCalls;
+        triangles += m_gaussianCount * 2;
     }
 
     Status VulkanRenderer::uploadModel(const Model& model)
@@ -1569,6 +1912,14 @@ namespace r4d::vulkan
         constants.viewProjection = m_camera.projection * m_camera.view;
         constants.lightViewProjection = lightViewProjection();
         constants.view = m_camera.view;
+        constants.splatViewport = Vec2{static_cast<float>(m_size.x),
+                                       static_cast<float>(m_size.y)};
+        // Focal length in pixels, recovered from the projection, which is what
+        // the covariance Jacobian needs.
+        constants.splatFocal =
+            Vec2{0.5f * static_cast<float>(m_size.x) * m_camera.projection[0][0],
+                 0.5f * static_cast<float>(m_size.y) * m_camera.projection[1][1]};
+        constants.splatNearPlane = kSplatNearPlane;
         constants.shadowTexelSize = 1.0f / static_cast<float>(kShadowMapSize);
         constants.cameraPosition = m_camera.position;
         constants.timeSeconds = timeSeconds;
@@ -1683,6 +2034,8 @@ namespace r4d::vulkan
                 triangles += primitive.indexCount / 3;
             }
         }
+
+        renderSplats(frame.commandBuffer, frameIndex, drawCalls, triangles);
 
         renderUi(frame.commandBuffer);
 
@@ -1929,6 +2282,19 @@ namespace r4d::vulkan
             if (m_shadowPipeline != VK_NULL_HANDLE)
             {
                 vkDestroyPipeline(m_context.device, m_shadowPipeline, nullptr);
+            }
+            destroySplatBuffers();
+            if (m_splatPipeline != VK_NULL_HANDLE)
+            {
+                vkDestroyPipeline(m_context.device, m_splatPipeline, nullptr);
+            }
+            if (m_splatPipelineLayout != VK_NULL_HANDLE)
+            {
+                vkDestroyPipelineLayout(m_context.device, m_splatPipelineLayout, nullptr);
+            }
+            if (m_splatSetLayout != VK_NULL_HANDLE)
+            {
+                vkDestroyDescriptorSetLayout(m_context.device, m_splatSetLayout, nullptr);
             }
             if (m_timestampPool != VK_NULL_HANDLE)
             {

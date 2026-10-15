@@ -26,6 +26,11 @@ namespace r4d::d3d12
         ~D3D12Renderer() override;
 
         void setCamera(const CameraParams& camera) override { m_camera = camera; }
+        void setRenderSettings(const RenderSettings& settings) override
+        {
+            m_settings = settings;
+        }
+        const RenderSettings& renderSettings() const override { return m_settings; }
         void setUiCallback(std::function<void()> callback) override
         {
             m_uiCallback = std::move(callback);
@@ -139,6 +144,7 @@ namespace r4d::d3d12
         ComPtr<ID3D12Resource> m_captureReadback;
         UINT64 m_captureReadbackBytes = 0;
 
+        RenderSettings m_settings;
         CameraParams m_camera;
         AdapterInfo m_adapterInfo;
         GpuCapabilities m_capabilities;

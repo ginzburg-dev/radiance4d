@@ -2,6 +2,7 @@
 #pragma once
 
 #include <radiance4d/graphics/GpuStats.hpp>
+#include <radiance4d/graphics/RenderSettings.hpp>
 
 #include <string>
 
@@ -21,5 +22,6 @@ namespace r4d
     // Draws the standard statistics window. Called between NewFrame and Render.
     void drawStatsWindow(const GpuStats& stats, const AdapterInfo& adapter,
                          const GpuCapabilities& capabilities, const std::string& backend,
-                         bool vsync, const std::string& cameraMode);
+                         bool vsync, const std::string& cameraMode,
+                         RenderSettings& settings);
 }

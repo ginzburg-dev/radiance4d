@@ -45,6 +45,18 @@ float3 fresnelSchlick(float3 f0, float vDotH)
     return f0 + (1.0f - f0) * pow(saturate(1.0f - vDotH), 5.0f);
 }
 
+// Karis split-sum approximation: an analytic stand-in for the prefiltered
+// environment BRDF lookup, so metals respond correctly without a LUT.
+float3 environmentBRDF(float3 f0, float roughness, float nDotV)
+{
+    const float4 c0 = float4(-1.0f, -0.0275f, -0.572f, 0.022f);
+    const float4 c1 = float4(1.0f, 0.0425f, 1.04f, -0.04f);
+    const float4 r = roughness * c0 + c1;
+    const float a004 = min(r.x * r.x, exp2(-9.28f * nDotV)) * r.x + r.y;
+    const float2 ab = float2(-1.04f, 1.04f) * a004 + r.zw;
+    return f0 * ab.x + ab.y;
+}
+
 float3 tonemap(float3 colour)
 {
     // ACES approximation.
@@ -108,20 +120,16 @@ float4 main(PSInput input) : SV_Target0
     }
 
     // Stand-in for image-based lighting: a vertical sky gradient sampled by the
-    // normal for diffuse and by the reflection vector for specular.
-    const float3 skyColour = float3(0.32f, 0.42f, 0.62f);
-    const float3 groundColour = float3(0.07f, 0.06f, 0.05f);
+    // normal for irradiance and by the reflection vector for specular.
+    const float3 skyColour = float3(0.34f, 0.44f, 0.66f);
+    const float3 groundColour = float3(0.06f, 0.055f, 0.05f);
 
     const float3 irradiance = lerp(groundColour, skyColour, saturate(n.y * 0.5f + 0.5f));
-    radiance += diffuseColour * irradiance * g_frame.ambient * 6.0f;
+    radiance += diffuseColour * irradiance * g_frame.ambient;
 
     const float3 r = reflect(-v, n);
     const float3 environment = lerp(groundColour, skyColour, saturate(r.y * 0.5f + 0.5f));
-    // Rougher surfaces reflect less sharply, so fade the environment with it.
-    const float3 fresnelRoughness =
-        f0 + (max((1.0f - roughness).xxx, f0) - f0) * pow(saturate(1.0f - nDotV), 5.0f);
-    radiance += environment * fresnelRoughness * g_frame.ambient * 6.0f *
-                (1.0f - roughness * 0.7f);
+    radiance += environment * environmentBRDF(f0, roughness, nDotV) * g_frame.ambient;
 
     radiance += g_material.emissive;
 

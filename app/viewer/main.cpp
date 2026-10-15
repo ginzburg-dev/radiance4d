@@ -40,6 +40,7 @@ namespace
         std::string scenePath;
         std::string outputPath;
         double fixedTimeStep = 0.0;
+        float exposure = -1.0f;   // negative: keep the renderer default
         bool help = false;
     };
 
@@ -59,6 +60,7 @@ namespace
             "  --scene <file.gltf>          load a glTF or glb scene\n"
             "  --headless                   no window; render to an offscreen target\n"
             "  --out <file.png>             write the last rendered frame as a PNG\n"
+            "  --exposure <value>           tone mapping exposure\n"
             "  --fixed-step <seconds>       advance animation by a fixed amount per\n"
             "                               frame instead of using the wall clock,\n"
             "                               which is what makes a capture reproducible\n"
@@ -138,6 +140,19 @@ namespace
                 if (!next(value)) return false;
                 options.outputPath = std::string{value};
             }
+            else if (arg == "--exposure")
+            {
+                if (!next(value)) return false;
+                try
+                {
+                    options.exposure = std::stof(std::string{value});
+                }
+                catch (const std::exception&)
+                {
+                    return false;
+                }
+                if (options.exposure <= 0.0f) return false;
+            }
             else if (arg == "--fixed-step")
             {
                 if (!next(value)) return false;
@@ -166,6 +181,8 @@ namespace
         return true;
     }
 
+    bool optionsExposureSet(const Options& options) { return options.exposure > 0.0f; }
+
     // Loads the scene, uploads it and frames the camera on it.
     bool setupScene(r4d::Renderer& gpu, r4d::Camera& camera, const Options& options)
     {
@@ -185,6 +202,13 @@ namespace
             }
             model = std::move(loaded.value());
             R4D_INFO("Scene: {}", options.scenePath);
+        }
+
+        if (optionsExposureSet(options))
+        {
+            r4d::RenderSettings settings = gpu.renderSettings();
+            settings.exposure = options.exposure;
+            gpu.setRenderSettings(settings);
         }
 
         if (auto status = gpu.uploadModel(model); !status)
@@ -377,9 +401,11 @@ namespace
             });
 
         gpu.setUiCallback([&]() {
+            RenderSettings settings = gpu.renderSettings();
             drawStatsWindow(gpu.stats(), gpu.adapterInfo(), gpu.capabilities(),
                             std::string{ToString(gpu.backend())}, gpu.vsync(),
-                            std::string{ToString(camera.mode())});
+                            std::string{ToString(camera.mode())}, settings);
+            gpu.setRenderSettings(settings);
         });
 
         R4D_INFO("Controls: Esc quit, F1 vsync, F2 camera mode, "

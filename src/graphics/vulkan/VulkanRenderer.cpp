@@ -1169,17 +1169,18 @@ namespace r4d::vulkan
         constants.viewProjection = m_camera.projection * m_camera.view;
         constants.cameraPosition = m_camera.position;
         constants.timeSeconds = timeSeconds;
-        constants.ambient = Vec3{0.055f, 0.065f, 0.09f};
-        constants.exposure = 1.0f;
+        constants.ambient = Vec3{m_settings.ambientIntensity, m_settings.ambientIntensity,
+                                     m_settings.ambientIntensity};
+        constants.exposure = m_settings.exposure;
         constants.lights[0].direction = glm::normalize(Vec3{-0.4f, 0.8f, -0.45f});
         constants.lights[0].colour = Vec3{1.0f, 0.96f, 0.9f};
-        constants.lights[0].intensity = 3.6f;
+        constants.lights[0].intensity = 2.4f;
         constants.lights[1].direction = glm::normalize(Vec3{0.75f, 0.25f, 0.3f});
         constants.lights[1].colour = Vec3{0.35f, 0.52f, 0.95f};
-        constants.lights[1].intensity = 1.5f;
+        constants.lights[1].intensity = 0.9f;
         constants.lights[2].direction = glm::normalize(Vec3{0.1f, -0.6f, 0.75f});
         constants.lights[2].colour = Vec3{0.95f, 0.45f, 0.3f};
-        constants.lights[2].intensity = 0.9f;
+        constants.lights[2].intensity = 0.5f;
         std::memcpy(static_cast<std::byte*>(m_frameUniforms.mapped) +
                         frameIndex * m_frameStride,
                     &constants, sizeof(constants));

@@ -24,6 +24,11 @@ namespace r4d::vulkan
 
         Status uploadModel(const Model& model) override;
         void setCamera(const CameraParams& camera) override { m_camera = camera; }
+        void setRenderSettings(const RenderSettings& settings) override
+        {
+            m_settings = settings;
+        }
+        const RenderSettings& renderSettings() const override { return m_settings; }
         void setUiCallback(std::function<void()> callback) override
         {
             m_uiCallback = std::move(callback);
@@ -156,6 +161,7 @@ namespace r4d::vulkan
         VkQueryPool m_timestampPool = VK_NULL_HANDLE;
         std::array<bool, kFramesInFlight> m_timestampWritten{};
 
+        RenderSettings m_settings;
         CameraParams m_camera;
         GpuStats m_stats;
         FrameTimer m_frameTimer;

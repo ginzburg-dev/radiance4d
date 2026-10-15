@@ -59,7 +59,8 @@ namespace r4d
 
     void drawStatsWindow(const GpuStats& stats, const AdapterInfo& adapter,
                          const GpuCapabilities& capabilities, const std::string& backend,
-                         bool vsync, const std::string& cameraMode)
+                         bool vsync, const std::string& cameraMode,
+                         RenderSettings& settings)
     {
         if (ImGui::GetCurrentContext() == nullptr)
         {
@@ -107,6 +108,11 @@ namespace r4d
             ImGui::Text("Mesh shaders   %s", capabilities.meshShadersSupported ? "yes" : "no");
             ImGui::TextWrapped("%s", capabilities.runtimeDescription.c_str());
         }
+
+        ImGui::Separator();
+        ImGui::SliderFloat("Exposure", &settings.exposure, 0.02f, 3.0f, "%.3f",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Ambient", &settings.ambientIntensity, 0.0f, 2.0f);
 
         ImGui::Separator();
         ImGui::TextUnformatted("Esc quit   F1 vsync   F2 camera");

@@ -342,6 +342,35 @@ namespace r4d
                              std::format("'{}' contains no triangle geometry", pathText));
         }
 
+        for (std::size_t i = 0; i < model.materials.size(); ++i)
+        {
+            const Material& m = model.materials[i];
+            R4D_INFO("glTF material[{}] {}: base({:.2f},{:.2f},{:.2f}) metal {:.2f} rough {:.2f} "
+                     "tex base={} mr={} nrm={}",
+                     i, m.name, m.baseColour.x, m.baseColour.y, m.baseColour.z, m.metallic,
+                     m.roughness, m.baseColourTexture, m.metallicRoughnessTexture,
+                     m.normalTexture);
+        }
+        {
+            Vec2 uvMin{1e9f, 1e9f};
+            Vec2 uvMax{-1e9f, -1e9f};
+            for (const Vertex& v : model.vertices)
+            {
+                uvMin = glm::min(uvMin, v.uv);
+                uvMax = glm::max(uvMax, v.uv);
+            }
+            R4D_INFO("glTF uv range: ({:.3f},{:.3f}) .. ({:.3f},{:.3f})", uvMin.x, uvMin.y,
+                     uvMax.x, uvMax.y);
+            R4D_INFO("glTF bounds: ({:.2f},{:.2f},{:.2f}) .. ({:.2f},{:.2f},{:.2f})",
+                     model.bounds.min.x, model.bounds.min.y, model.bounds.min.z,
+                     model.bounds.max.x, model.bounds.max.y, model.bounds.max.z);
+        }
+        for (std::size_t i = 0; i < model.textures.size(); ++i)
+        {
+            R4D_INFO("glTF texture[{}]: {}x{} srgb {}", i, model.textures[i].image.width,
+                     model.textures[i].image.height, model.textures[i].srgb);
+        }
+
         R4D_INFO("glTF: {} vertices, {} triangles, {} primitives, {} materials, {} textures",
                  model.vertices.size(), model.triangleCount(), model.primitives.size(),
                  model.materials.size(), model.textures.size());

@@ -6,6 +6,7 @@
 #include <radiance4d/core/Result.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -44,6 +45,11 @@ namespace r4d
 
         const InputState& input() const { return m_input; }
 
+        // Return true to consume the message before Window handles it.
+        using MessageHook =
+            std::function<bool(void*, unsigned, unsigned long long, long long)>;
+        void setMessageHook(MessageHook hook) { m_messageHook = std::move(hook); }
+
         void setTitle(const std::string& title);
         void setClientSize(UVec2 size);
 
@@ -58,6 +64,7 @@ namespace r4d
         bool m_shouldClose = false;
         bool m_resized = false;
         InputState m_input;
+        MessageHook m_messageHook;
     };
 
 } // namespace r4d

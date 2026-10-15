@@ -3,6 +3,10 @@
 
 #include <radiance4d/core/FileSystem.hpp>
 
+#include <imgui.h>
+#include <imgui_impl_dx12.h>
+#include <imgui_impl_win32.h>
+
 #include <cstring>
 
 namespace r4d::d3d12
@@ -202,6 +206,8 @@ namespace r4d::d3d12
         // Before reportLiveObjects, or these always look leaked.
         m_profiler.shutdown();
 
+        shutdownUi();
+
         m_textures.clear();
         m_srvHeap.Reset();
         m_depthBuffer.Reset();
@@ -280,6 +286,11 @@ namespace r4d::d3d12
 
         R4D_TRY(createPipeline(shaderDirectory));
 
+        if (!m_headless)
+        {
+            R4D_TRY(initialiseUi(desc.windowHandle));
+        }
+
         // Missing timestamp support is not fatal; stats report them as invalid.
         R4D_TRY(m_profiler.initialise(m_device.Get(), m_queue.Get(), kFramesInFlight));
 
@@ -292,6 +303,83 @@ namespace r4d::d3d12
                  m_headless ? 1u : kBackBufferCount,
                  m_headless ? "offscreen target" : "back buffers", kFramesInFlight);
         return Status::Ok();
+    }
+
+    Status D3D12Renderer::initialiseUi(void* windowHandle)
+    {
+        // ImGui needs its own shader-visible descriptor for the font atlas.
+        D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        heapDesc.NumDescriptors = 1;
+        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        R4D_HR(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_uiHeap)),
+               "CreateDescriptorHeap (ImGui)");
+        m_uiHeap->SetName(L"Radiance4D ImGui Heap");
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::StyleColorsDark();
+        ImGui::GetIO().IniFilename = nullptr;
+
+        if (!ImGui_ImplWin32_Init(windowHandle))
+        {
+            return makeError(ErrorCode::ApiCallFailed, "ImGui_ImplWin32_Init failed");
+        }
+
+        ImGui_ImplDX12_InitInfo info{};
+        info.Device = m_device.Get();
+        info.CommandQueue = m_queue.Get();
+        info.NumFramesInFlight = static_cast<int>(kFramesInFlight);
+        info.RTVFormat = kBackBufferFormat;
+        info.DSVFormat = kDepthFormat;
+        info.SrvDescriptorHeap = m_uiHeap.Get();
+        info.LegacySingleSrvCpuDescriptor = m_uiHeap->GetCPUDescriptorHandleForHeapStart();
+        info.LegacySingleSrvGpuDescriptor = m_uiHeap->GetGPUDescriptorHandleForHeapStart();
+
+        if (!ImGui_ImplDX12_Init(&info))
+        {
+            return makeError(ErrorCode::ApiCallFailed, "ImGui_ImplDX12_Init failed");
+        }
+
+        m_uiReady = true;
+        R4D_INFO("UI: Dear ImGui {} ready", IMGUI_VERSION);
+        return Status::Ok();
+    }
+
+    void D3D12Renderer::shutdownUi()
+    {
+        if (!m_uiReady)
+        {
+            return;
+        }
+        m_uiReady = false;
+        ImGui_ImplDX12_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+        m_uiHeap.Reset();
+    }
+
+    void D3D12Renderer::renderUi()
+    {
+        if (!m_uiReady)
+        {
+            return;
+        }
+
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        if (m_uiCallback)
+        {
+            m_uiCallback();
+        }
+
+        ImGui::Render();
+
+        ID3D12DescriptorHeap* heaps[] = {m_uiHeap.Get()};
+        m_commandList->SetDescriptorHeaps(1, heaps);
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
     }
 
     Status D3D12Renderer::createRtvHeap()
@@ -1277,6 +1365,8 @@ namespace r4d::d3d12
             ++drawCalls;
             triangles += primitive.indexCount / 3;
         }
+
+        renderUi();
 
         if (!m_headless)
         {

@@ -7,7 +7,7 @@ C++20, built directly on Direct3D 12. Vulkan backend planned.
 
 ## Status
 
-Milestone M1 complete. Features marked *planned* are not implemented.
+Milestone M2 complete. Features marked *planned* are not implemented.
 
 | Area | Status |
 |---|---|
@@ -22,7 +22,12 @@ Milestone M1 complete. Features marked *planned* are not implemented.
 | GPU timestamp profiling | working |
 | Headless rendering and frame capture | working |
 | WARP image-regression tests, CI | working |
-| Depth buffering, PBR, camera, glTF, ImGui | planned (M2) |
+| Depth buffering | working |
+| Orbit and free-fly cameras | working |
+| glTF loading (cgltf) | working |
+| PBR shading, analytic lights | working |
+| Base colour, metallic-roughness, normal maps | working |
+| ImGui statistics overlay | working |
 | Vulkan backend | planned (M3) |
 | 3D Gaussian Splatting | planned (M4) |
 | COLMAP / gsplat reconstruction | planned (M5) |
@@ -51,8 +56,10 @@ See [docs/BUILDING.md](docs/BUILDING.md).
 build/windows-d3d12/bin/Debug/radiance4d_viewer.exe
 ```
 
-`--adapter <index|warp|name>`, `--no-vsync`, `--gpu-validation`, `--frames <n>`,
-`--resize-cycles <n>`, `--log-level <0..5>`. `--help` lists all flags. Exit code is non-zero if the
+`--scene <file.gltf>`, `--adapter <index|warp|name>`, `--no-vsync`, `--gpu-validation`,
+`--frames <n>`, `--resize-cycles <n>`, `--log-level <0..5>`. `--help` lists all flags.
+Without `--scene` a built-in material grid is rendered. Esc quits, F1 toggles vsync, F2 switches
+camera mode; left mouse orbits, right pans, wheel zooms, WASDQE moves in free-fly. Exit code is non-zero if the
 debug layer reported an error.
 
 Headless, no GPU required:
@@ -74,4 +81,4 @@ MIT, see [LICENSE](LICENSE).
 Fetched at configure time under their own licenses: GLM (MIT), GoogleTest (BSD-3-Clause), DirectX
 Shader Compiler (LLVM/NCSA + MIT), DirectX Agility SDK and WARP (Microsoft; `D3D12Core.dll`,
 `d3d12SDKLayers.dll`, `d3dconfig.exe` and `d3d10warp.dll` are redistributable per the package terms),
-stb (MIT / public domain).
+stb (MIT / public domain), cgltf (MIT), Dear ImGui (MIT).

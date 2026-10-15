@@ -26,6 +26,10 @@ namespace r4d::d3d12
         ~D3D12Renderer() override;
 
         void setCamera(const CameraParams& camera) override { m_camera = camera; }
+        void setUiCallback(std::function<void()> callback) override
+        {
+            m_uiCallback = std::move(callback);
+        }
         Status renderFrame() override;
         Status resize(UVec2 newSize) override;
         void waitForGpuIdle() override;
@@ -83,6 +87,9 @@ namespace r4d::d3d12
 
         Status createOffscreenTarget(UVec2 size);
         Status createDepthBuffer(UVec2 size);
+        Status initialiseUi(void* windowHandle);
+        void shutdownUi();
+        void renderUi();
 
         ID3D12Resource* currentRenderTarget(UINT backBufferIndex) const;
         D3D12_CPU_DESCRIPTOR_HANDLE currentRenderTargetView(UINT backBufferIndex) const;
@@ -102,6 +109,9 @@ namespace r4d::d3d12
         ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
         ComPtr<ID3D12Resource> m_depthBuffer;
         ComPtr<ID3D12DescriptorHeap> m_srvHeap;
+        ComPtr<ID3D12DescriptorHeap> m_uiHeap;
+        std::function<void()> m_uiCallback;
+        bool m_uiReady = false;
         UINT m_srvDescriptorSize = 0;
         std::vector<ComPtr<ID3D12Resource>> m_textures;
         UINT m_rtvDescriptorSize = 0;

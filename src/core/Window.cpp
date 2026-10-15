@@ -231,6 +231,11 @@ namespace r4d
     {
         const HWND hwnd = static_cast<HWND>(m_hwnd);
 
+        if (m_messageHook && m_messageHook(m_hwnd, msg, wparam, lparam))
+        {
+            return 0;
+        }
+
         switch (msg)
         {
             case WM_SIZE:

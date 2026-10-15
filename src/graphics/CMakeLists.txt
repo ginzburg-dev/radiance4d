@@ -5,10 +5,13 @@
 
 set(R4D_GRAPHICS_SOURCES
     AdapterInfo.cpp
+    DebugUi.cpp
     BackendType.cpp
     GpuCapabilities.cpp
     Renderer.cpp
 )
+
+list(APPEND R4D_GRAPHICS_SOURCES ${R4D_IMGUI_SOURCES})
 
 if(R4D_ENABLE_D3D12)
     list(APPEND R4D_GRAPHICS_SOURCES
@@ -26,13 +29,17 @@ target_include_directories(r4d_graphics
         "${CMAKE_SOURCE_DIR}/include"
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        ${R4D_IMGUI_INCLUDE_DIRS}
 )
+
+# Dear ImGui is not ours, so it is not held to /W4 /WX.
+set_source_files_properties(${R4D_IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "/W0")
 
 target_link_libraries(r4d_graphics PUBLIC r4d_core r4d_scene)
 
 if(R4D_ENABLE_D3D12)
     target_compile_definitions(r4d_graphics PRIVATE R4D_ENABLE_D3D12=1)
-    target_link_libraries(r4d_graphics PRIVATE d3d12 dxgi dxguid)
+    target_link_libraries(r4d_graphics PRIVATE d3d12 dxgi dxguid dwmapi)
 
     if(R4D_ENABLE_AGILITY_SDK)
         # BEFORE matters: the Agility headers must win over the Windows SDK copies,

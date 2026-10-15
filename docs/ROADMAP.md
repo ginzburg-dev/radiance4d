@@ -1,6 +1,6 @@
 # Roadmap
 
-Each milestone is independently verifiable. Current position: M1 complete, M2 next.
+Each milestone is independently verifiable. Current position: M2 complete, M3 next.
 
 ## M0 — Environment and architecture
 
@@ -38,8 +38,11 @@ Not implemented in M1: depth buffer, backface culling, custom allocator, per-pas
 
 ## M2 — Interactive PBR viewer
 
-Orbit and free-fly cameras, glTF loading, physically based shading, lighting, depth buffering, ImGui
-performance UI. Backface culling is enabled here. Adds Dear ImGui, cgltf, stb_image.
+Orbit and free-fly cameras, glTF loading through cgltf, Cook-Torrance GGX shading with three
+analytic lights and a gradient environment term, base colour, metallic-roughness and normal maps
+with CPU-generated mips, depth buffering, backface culling, and an ImGui statistics overlay.
+
+Not implemented: image-based lighting, shadows, transparency sorting, texture compression.
 
 ## M3 — Vulkan backend
 

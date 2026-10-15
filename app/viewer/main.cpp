@@ -7,6 +7,7 @@
 #include <radiance4d/core/Log.hpp>
 #include <radiance4d/core/Version.hpp>
 #include <radiance4d/core/Window.hpp>
+#include <radiance4d/graphics/DebugUi.hpp>
 #include <radiance4d/graphics/Renderer.hpp>
 #include <radiance4d/scene/Camera.hpp>
 #include <radiance4d/scene/Model.hpp>
@@ -370,6 +371,17 @@ namespace
             return 1;
         }
 
+        window.value()->setMessageHook(
+            [](void* hwnd, unsigned message, unsigned long long wparam, long long lparam) {
+                return debugUiHandleMessage(hwnd, message, wparam, lparam);
+            });
+
+        gpu.setUiCallback([&]() {
+            drawStatsWindow(gpu.stats(), gpu.adapterInfo(), gpu.capabilities(),
+                            std::string{ToString(gpu.backend())}, gpu.vsync(),
+                            std::string{ToString(camera.mode())});
+        });
+
         R4D_INFO("Controls: Esc quit, F1 vsync, F2 camera mode, "
                  "LMB orbit, RMB pan, wheel zoom, WASDQE in free-fly");
 
@@ -423,7 +435,12 @@ namespace
                 camera.setAspect(static_cast<float>(viewport.x) /
                                  static_cast<float>(viewport.y));
             }
-            camera.update(input, gpu.stats().cpuFrameMs / 1000.0);
+            // The UI gets first refusal on input, so dragging a window does not
+            // also orbit the camera.
+            if (!debugUiWantsMouse() && !debugUiWantsKeyboard())
+            {
+                camera.update(input, gpu.stats().cpuFrameMs / 1000.0);
+            }
             gpu.setCamera(CameraParams{camera.view(), camera.projection(),
                                        camera.position()});
 

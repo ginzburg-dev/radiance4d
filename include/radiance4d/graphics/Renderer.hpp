@@ -13,6 +13,7 @@
 #include <radiance4d/graphics/GpuStats.hpp>
 #include <radiance4d/scene/Model.hpp>
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -61,6 +62,9 @@ namespace r4d
         virtual Status uploadModel(const Model& model) = 0;
 
         virtual void setCamera(const CameraParams& camera) = 0;
+
+        // Called each frame between ImGui NewFrame and Render. Ignored when headless.
+        virtual void setUiCallback(std::function<void()> callback) = 0;
 
         virtual Status renderFrame() = 0;
 

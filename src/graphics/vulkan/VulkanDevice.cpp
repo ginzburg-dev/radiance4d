@@ -313,21 +313,23 @@ namespace r4d::vulkan
         queueInfo.queueCount = 1;
         queueInfo.pQueuePriorities = &priority;
 
-        // Both are core in 1.3 but still have to be switched on explicitly.
+        // All core in 1.3 but still have to be switched on explicitly.
+        // demoteToHelperInvocation: dxc compiles HLSL discard to
+        // OpDemoteToHelperInvocation, which the splat pixel shader uses.
         VkPhysicalDeviceVulkan13Features features13{
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-        features13.dynamicRendering = VK_TRUE;
-        features13.synchronization2 = VK_TRUE;
 
         VkPhysicalDeviceFeatures2 features2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         features2.pNext = &features13;
         vkGetPhysicalDeviceFeatures2(context.physicalDevice, &features2);
 
-        if (features13.dynamicRendering != VK_TRUE || features13.synchronization2 != VK_TRUE)
+        if (features13.dynamicRendering != VK_TRUE || features13.synchronization2 != VK_TRUE ||
+            features13.shaderDemoteToHelperInvocation != VK_TRUE)
         {
             return makeError(ErrorCode::UnsupportedFeature,
-                             "this device does not report dynamicRendering and "
-                             "synchronization2, which the Vulkan backend requires");
+                             "this device does not report dynamicRendering, "
+                             "synchronization2 and shaderDemoteToHelperInvocation, which the "
+                             "Vulkan backend requires");
         }
 
         VkPhysicalDeviceFeatures enabledFeatures{};
@@ -339,6 +341,7 @@ namespace r4d::vulkan
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
         enable13.dynamicRendering = VK_TRUE;
         enable13.synchronization2 = VK_TRUE;
+        enable13.shaderDemoteToHelperInvocation = VK_TRUE;
 
         VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         deviceInfo.pNext = &enable13;

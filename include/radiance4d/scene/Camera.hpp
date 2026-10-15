@@ -37,6 +37,15 @@ namespace r4d
         // Frames the camera on a bounding sphere.
         void focusOn(Vec3 centre, float radius);
 
+        // Aims the camera, in degrees: yaw turns it around the subject, pitch
+        // lifts it above. The viewer exposes this so that a capture of a scene
+        // whose default direction looks into clutter is still reproducible from
+        // a command line.
+        void setAngles(float yawDegrees, float pitchDegrees);
+
+        float yawDegrees() const;
+        float pitchDegrees() const;
+
         Mat4 view() const;
         Mat4 projection() const;
         Mat4 viewProjection() const { return projection() * view(); }

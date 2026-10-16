@@ -36,7 +36,8 @@ image-regression tests, GitHub Actions CI.
 Verified: 8/8 tests in Debug and RelWithDebInfo, reference image matches under optimisation,
 byte-identical captures with a fixed time step and differing captures without one.
 
-Not implemented in M1: depth buffer, backface culling, custom allocator, per-pass GPU timings.
+Not implemented in M1: depth buffer, backface culling, custom allocator, per-pass GPU timings (the
+timings landed in M4).
 
 ## M2 — Interactive PBR viewer
 
@@ -70,14 +71,16 @@ Done: image-based lighting, shadow mapping, a licensed glTF scene, the ImGui ove
 backends, exposure control, a reproducible benchmark mode and README screenshots.
 
 Outstanding: GPU profiling with a real tool (PIX, Nsight Graphics or RenderDoc; none installed), a
-scene heavy enough for the numbers to mean something, and a demo video.
+scene heavy enough for the numbers to mean something, and a demo video. In-engine per-pass
+timestamps landed in M4 and cover the splat path; they are not a substitute for a real tool.
 
 ## M4 — Static Gaussian splatting
 
 Done: GPU attribute storage, 3D covariance projection to a screen-space conic, alpha compositing
 back to front, a GPU depth sort, a procedural cloud for development and tests, a shared depth
 buffer with the mesh pass, both backends drawing it from the same shaders, `.ply` dataset loading,
-and degree-3 spherical-harmonic colour evaluated per splat from the view direction.
+degree-3 spherical-harmonic colour evaluated per splat from the view direction, and per-pass GPU
+timestamps across the splat path on both backends.
 
 Visibility culling and tile-based binning were left until last, because neither can be honestly
 measured against 20k procedural splats; both are now done against the million-splat workload a real
@@ -165,8 +168,34 @@ writes once. Retaking the reference records 2787 of 230400 pixels moving by at m
 cross-backend agreement improved from max channel delta 2 over 0.49% of pixels to delta 1 over
 0.046%.
 
-What is still missing is per-pass timing: the splat path is now seven compute dispatches and a
-rasteriser, and nothing here separates their costs.
+Per-pass GPU timestamps now separate those costs. Six scopes bracket the splat path — cull, depth
+sort, binning, tile sort, rasterise, composite — with the sixteen radix dispatches grouped into two
+entries, on both backends, reported in the ImGui overlay and in the `--benchmark` report, and
+switchable off with `--no-pass-timings`. On `train` at 1920x1080 over 200 measured frames:
+
+| Pass | D3D12 | Vulkan |
+|---|---|---|
+| Cull | 0.91 ms | 0.74 ms |
+| Depth sort | 0.81 ms | 0.74 ms |
+| Binning | 1.38 ms | 1.27 ms |
+| Tile sort | 2.74 ms | 4.00 ms |
+| Rasterise | 3.82 ms | 3.59 ms |
+| Composite | 0.04 ms | 0.04 ms |
+| sum of the six scopes | 9.69 ms | 10.37 ms |
+| whole-frame pair | 9.70 ms | 10.38 ms |
+
+The scopes sum to the whole-frame pair within 0.01 ms. The rasteriser is the largest single pass at
+39% of the D3D12 frame, but the depth sort, binning and tile sort together are 51% of it, and the
+tile sort alone costs more than the depth sort that feeds it: the remaining cost is in getting the
+splats into tiles. The one place the backends disagree is that tile sort, 4.00 ms on Vulkan against
+2.74 on D3D12, which is more than the 0.68 ms by which the whole Vulkan frame is dearer — Vulkan is
+cheaper in all five other passes. The same kernels run on both, so that gap is a dispatch or barrier
+difference around the pair buffers, and it is the next thing to chase.
+
+The scopes are not paid for in frame time: paired runs with and without `--no-pass-timings`, interleaved three
+times per backend, differ by 0.02 ms of frame time against a 0.3 ms run-to-run spread, so the twelve
+extra timestamps are not measurable. A sampling profiler is still outstanding; this attributes time
+per pass, not per instruction.
 
 A second published scene has been through the same path to see how it scales: INRIA's `truck`,
 2,541,226 splats at SH degree 3, 581.6 MiB of GPU attributes and 96.9 MiB of sort scratch, zero
@@ -183,8 +212,8 @@ target to 160x90 to strip the fill leaves the view-independent half: D3D12 goes 
 for the 2.476x splat count, linear to within 0.1%, while Vulkan goes 2.182 ms to 7.217 ms. A
 procedural sweep holding the data fixed confirms it: Vulkan is the cheaper backend to a little over
 2M splats and the dearer one above that, and from 1M to 4M it rises 4.40x against D3D12's 3.87x.
-Which pass accounts for that is not separable without per-pass timing, which the project does not
-have yet.
+Those runs predate the per-pass scopes and have not been re-run with them, so which pass bends at
+those counts is still open; at 1080p on `train` it is the tile sort that separates the backends.
 
 That makes the ordering of the remaining work concrete. Fill, not splat count, sets the frame, which
 is the argument for tiled binning; and the per-splat half being linear is what says the sort is no

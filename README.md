@@ -257,8 +257,9 @@ obscurely. `tools/reconstruct/README.md` has the detail.
 ## Measurements
 
 `--benchmark <n>` renders headless with the debug layer off, discards 64 warm-up frames and reports
-CPU and GPU frame time. GPU time comes from timestamp queries around the frame. `--grid <cols>x<rows>`
-sizes the built-in scene.
+CPU and GPU frame time. GPU time comes from timestamp queries around the frame, and from one pair
+per splat pass inside it; `--no-pass-timings` drops the inner pairs. `--grid <cols>x<rows>` sizes the
+built-in scene.
 
 RTX 3080 Laptop GPU (GA104, 16 GB), driver 617.14, i7-11800H, RelWithDebInfo, vsync off, mean of the
 measured frames:
@@ -340,10 +341,9 @@ holds the data distribution fixed and varies only the count, puts the crossover 
 | D3D12 | 0.886 | 1.669 | 3.432 | 7.127 | 8.105 | 13.279 ms |
 | Vulkan | 0.764 | 1.620 | 3.340 | 6.863 | 8.960 | 14.698 ms |
 
-From 1M to 4M D3D12 goes up 3.87x for 4x the splats; Vulkan goes up 4.40x. Which of the five sort
-kernels or the draw accounts for it is not something these numbers separate, because there is no
-per-pass timing yet. That is what the missing profiler is for, and it is now the first thing worth
-building.
+From 1M to 4M D3D12 goes up 3.87x for 4x the splats; Vulkan goes up 4.40x. These runs predate the
+per-pass timestamps and have not been re-run with them, so which kernel bends is still open at those
+counts; the split at 1080p is below.
 
 **What the cull pass changed.** The vertex shader used to rebuild the 3D covariance, the Jacobian
 and the whole degree-3 spherical-harmonic sum at each of a quad's four corners — four times the work
@@ -386,10 +386,45 @@ rasteriser accumulates in floating point and writes once. The reference was reta
 it records is 2787 of 230400 pixels moving by at most 9 levels. Cross-backend agreement improved at
 the same time, from max channel delta 2 over 0.49% of pixels to delta 1 over 0.046%.
 
-What is left is the shape of the work rather than its amount: the rasteriser is one kernel with no
-per-pass timing, so which of binning, sorting or shading now dominates is still not separated.
+**Where the splat frame goes.** Six timestamp scopes bracket the splat path: the cull pass, the
+eight-pass depth radix sort, tile binning, the two-pass tile sort with its per-tile ranges, the tile
+rasteriser and the composite draw. Sixteen radix dispatches collapse into two entries on purpose —
+the question is which stage dominates, not which of eight identical passes does. `train` at
+1920x1080, `--benchmark 200`, mean of the measured frames:
 
-A real profiler is still outstanding.
+| Pass | D3D12 | Vulkan |
+|---|---|---|
+| Cull | 0.91 ms | 0.74 ms |
+| Depth sort | 0.81 ms | 0.74 ms |
+| Binning | 1.38 ms | 1.27 ms |
+| Tile sort | 2.74 ms | 4.00 ms |
+| Rasterise | 3.82 ms | 3.59 ms |
+| Composite | 0.04 ms | 0.04 ms |
+| sum of the six scopes | 9.69 ms | 10.37 ms |
+| whole-frame pair | 9.70 ms | 10.38 ms |
+
+The scopes account for the frame to within 0.01 ms, which is the check that they bracket what they
+claim to. The rasteriser is the largest single pass on D3D12 at 39% of the frame, but it is not most
+of it: the depth sort, the binning and the tile sort together are 51%, and the tile sort alone costs
+more than the depth sort that feeds it. That is the answer the earlier rows could not separate — the
+cost is in getting the splats into tiles, not only in shading them. The cull pass projecting a
+million splats is 0.91 ms, and the composite is noise.
+
+The backends disagree in one place and agree everywhere else. Vulkan's tile sort is 4.00 ms against
+D3D12's 2.74, a 1.26 ms gap, and it is more than the 0.68 ms by which Vulkan's whole frame is
+dearer: Vulkan is cheaper in every other pass — cull by 0.17, rasterise by 0.23, depth sort and
+binning by 0.18 between them — and those 0.58 ms absorb the rest of it exactly. The same radix
+kernels run on both backends, so this is a dispatch or barrier difference around the pair buffers
+rather than shader performance, and it is the first thing to look at next.
+
+The instrumentation itself does not cost anything measurable. Paired `--benchmark 200` runs with and
+without `--no-pass-timings`, interleaved three times per backend, put the whole-frame mean at
+9.75 ms with the scopes on against 9.74 off on D3D12, and 10.28 against 10.26 on Vulkan: differences
+of 0.02 ms against a run-to-run spread of 0.3 ms. The twelve extra timestamps per frame do not show
+up.
+
+A sampling profiler is still outstanding. This attributes GPU time per pass, not per instruction,
+and it cannot say why a pass costs what it does.
 
 ## Building
 

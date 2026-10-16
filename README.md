@@ -248,6 +248,8 @@ measured frames:
 | INRIA `train`, 1.03M splats, CPU sort | 1920x1080 | Vulkan | 99.731 ms | 32.387 ms |
 | INRIA `train`, 1.03M splats, GPU sort | 1920x1080 | D3D12 | 22.475 ms | 22.455 ms |
 | INRIA `train`, 1.03M splats, GPU sort | 1920x1080 | Vulkan | 18.707 ms | 18.677 ms |
+| INRIA `train`, 1.03M splats, + cull pass | 1920x1080 | D3D12 | 14.866 ms | 14.846 ms |
+| INRIA `train`, 1.03M splats, + cull pass | 1920x1080 | Vulkan | 12.172 ms | 12.041 ms |
 | INRIA `truck`, 2.54M splats, GPU sort | 1920x1080 | D3D12 | 14.718 ms | 14.698 ms |
 | INRIA `truck`, 2.54M splats, GPU sort | 1920x1080 | Vulkan | 14.045 ms | 14.018 ms |
 
@@ -314,9 +316,27 @@ kernels or the draw accounts for it is not something these numbers separate, bec
 per-pass timing yet. That is what the missing profiler is for, and it is now the first thing worth
 building.
 
+**What the cull pass changed.** The vertex shader used to rebuild the 3D covariance, the Jacobian
+and the whole degree-3 spherical-harmonic sum at each of a quad's four corners — four times the work
+for one answer. The pass that already walked every splat to build its sort key now projects it as
+well and leaves a 48-byte screen-space record, and the vertex shader reads that. The same pass
+collapses to a zero radius any splat whose quad cannot reach a pixel. On `train` at 1080p that is
+22.455 ms to 14.846 ms on D3D12 and 18.677 to 12.041 on Vulkan.
+
+The rejection is exact — a splat is dropped only when it cannot colour a pixel — and the measurement
+says so: removing the viewport test from the pass leaves the capture identical, the same 2,619
+pixels from the one before the change, which are precision and not geometry. That is also why the
+stored WARP reference still passes untouched.
+
+An indirect draw was tried and removed. Counting the survivors and issuing `ExecuteIndirect` with
+that instance count measured 14.846 ms against 14.530 for collapsing the culled splats instead,
+which is within run-to-run noise, and the pinned WARP draws nothing at all through `ExecuteIndirect`
+— reproduced with the argument buffer filled by the CPU, so it is not the compute write. Paying a
+CI blind spot for no measured gain was not worth it.
+
 What is left in the frame is still the draw. Every number here is one undivided draw call with no
-visibility culling and no tiled binning, which is exactly the remaining M4 work — and the fact that
-fill, not splat count, sets the frame is the argument for doing the binning.
+tiled binning, and the fact that fill, not splat count, sets the frame is the argument for doing
+it.
 
 A real profiler is still outstanding.
 

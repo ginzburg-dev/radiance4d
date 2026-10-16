@@ -125,8 +125,25 @@ mostly because the order buffer left the upload heap and the vertex shader stopp
 per instance across PCIe; a control at 20,000 splats, where neither build is CPU-bound, puts the two
 within 0.062 ms, so that is work removed and not a clock artefact.
 
-What remains in the frame is the draw itself: one undivided draw call, no visibility culling, no
-tiled binning.
+Visibility culling has since been answered too, in the pass that was already there. Building the
+sort key means visiting every splat, so that pass now also projects it once and writes a 48-byte
+screen-space record — centre, radius, conic, opacity and the evaluated spherical-harmonic colour —
+which the vertex shader reads instead of rebuilding the covariance and the degree-3 sum at each of
+the quad's four corners. A splat whose quad cannot reach a pixel is collapsed to a zero radius.
+`train` at 1080p went from 22.455 ms of GPU to 14.846 on D3D12 and 18.677 to 12.041 on Vulkan.
+
+The rejection is exact rather than a heuristic, and that was measured rather than argued: with the
+viewport test removed the capture is identical, differing from the pre-change one in the same 2,619
+pixels of 921,600, which are floating-point and not geometry. The stored WARP reference passes
+untouched.
+
+Driving the draw indirectly from a GPU-side survivor count was implemented and then removed. It
+measured 14.846 ms against 14.530 for collapsing the culled splats, which is inside the run-to-run
+spread, and the pinned WARP draws nothing through `ExecuteIndirect` — reproduced with the argument
+buffer filled by the CPU, so the compute write was not the cause. A blind spot in the only
+GPU-independent test path was not worth paying for no measured gain.
+
+What remains in the frame is the draw itself: one undivided draw call and no tiled binning.
 
 A second published scene has been through the same path to see how it scales: INRIA's `truck`,
 2,541,226 splats at SH degree 3, 581.6 MiB of GPU attributes and 96.9 MiB of sort scratch, zero

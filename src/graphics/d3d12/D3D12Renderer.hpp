@@ -100,7 +100,8 @@ namespace r4d::d3d12
         void rasteriseSplats(UINT frameIndex);
         Status createSortPipelines(const std::filesystem::path& shaderDirectory);
         void sortSplats(UINT frameIndex);
-        void renderSplats(std::uint32_t& drawCalls, std::uint32_t& triangles);
+        void renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
+                          std::uint32_t& triangles);
         void renderShadowPass();
         Mat4 lightViewProjection() const;
         Status initialiseUi(void* windowHandle);
@@ -246,6 +247,8 @@ namespace r4d::d3d12
         GpuStats m_stats;
         FrameTimer m_frameTimer;
         RollingAverage<FrameTimer::kHistorySize> m_gpuTimeHistory;
+        std::array<RollingAverage<FrameTimer::kHistorySize>, kGpuPassCount>
+            m_gpuPassHistory{};
 
         UVec2 m_size{0, 0};
         std::uint64_t m_frameCounter = 0;

@@ -107,6 +107,9 @@ namespace r4d::vulkan
 
         // Must match R4D_TILE_SIZE in SplatTiles.hlsli.
         constexpr std::uint32_t kSplatTileSize = 16;
+        // Enough tile ranges for any viewport this renderer will be resized to.
+        constexpr std::uint32_t kMaxTiles = ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
+                                            ((4320 + kSplatTileSize - 1) / kSplatTileSize);
         constexpr std::uint32_t kPairsPerSplat = 8;
         constexpr VkFormat kSplatColourFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
         // Two passes of the radix sort cover a 16-bit tile id.
@@ -1601,11 +1604,6 @@ namespace r4d::vulkan
             ((count * kPairsPerSplat + kSortGroupSize - 1) / kSortGroupSize) * kSortGroupSize;
         m_pairTileCount = m_pairCapacity / kSortGroupSize;
 
-        // Enough tile ranges for any viewport this renderer will be resized to.
-        constexpr std::uint32_t kMaxTiles =
-            ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
-            ((4320 + kSplatTileSize - 1) / kSplatTileSize);
-
         // Digit-major, one row of per-tile counts per digit. The tile sort runs
         // over the pairs, which is the larger of the two.
         const VkDeviceSize histogramEntries =
@@ -1717,15 +1715,45 @@ namespace r4d::vulkan
         R4D_TRY(createSplatDescriptors());
         R4D_TRY(createSortDescriptors());
 
-        const double sortMiB = static_cast<double>(kFramesInFlight) *
-                               static_cast<double>(4 * m_sortPaddedCount +
-                                                   histogramEntries + kSortBuckets) *
-                               sizeof(std::uint32_t) / (1024.0 * 1024.0);
+        constexpr double kMiB = 1024.0 * 1024.0;
         R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB), sorted on the GPU in {} "
-                 "tiles ({:.1f} MiB of sort buffers)",
-                 count, static_cast<double>(splatBytes) / (1024.0 * 1024.0),
-                 m_sortTileCount, sortMiB);
+                 "tiles ({:.1f} MiB of sort buffers, {:.1f} MiB of pair buffers for "
+                 "{} pairs)",
+                 count, static_cast<double>(splatBytes) / kMiB, m_sortTileCount,
+                 static_cast<double>(sortBufferBytes()) / kMiB,
+                 static_cast<double>(pairBufferBytes()) / kMiB, m_pairCapacity);
         return Status::Ok();
+    }
+
+    // Everything the splat path holds whose size is fixed by the splat count.
+    VkDeviceSize VulkanRenderer::sortBufferBytes() const
+    {
+        if (m_gaussianCount == 0)
+        {
+            return 0;
+        }
+        // Per frame slot: the order, both halves of the key ping-pong and the
+        // spare value half, the per-splat tile counts and their prefix sum, the
+        // scan's group sums, the digit bases and the per-tile ranges.
+        const VkDeviceSize entries = static_cast<VkDeviceSize>(6) * m_sortPaddedCount +
+                                     m_sortTileCount + 1 + kSortBuckets + kMaxTiles * 2;
+        return (entries * sizeof(std::uint32_t) +
+                static_cast<VkDeviceSize>(m_gaussianCount) * sizeof(SplatProjection)) *
+               kFramesInFlight;
+    }
+
+    // The four pair buffers and the histogram the tile sort shares with the
+    // depth sort, which between them are most of what the splat path costs.
+    VkDeviceSize VulkanRenderer::pairBufferBytes() const
+    {
+        if (m_gaussianCount == 0)
+        {
+            return 0;
+        }
+        const VkDeviceSize entries = static_cast<VkDeviceSize>(4) * m_pairCapacity +
+                                     static_cast<VkDeviceSize>(kSortBuckets) *
+                                         std::max(m_sortTileCount, m_pairTileCount);
+        return entries * sizeof(std::uint32_t) * kFramesInFlight;
     }
 
     Status VulkanRenderer::createSortPipelines(const std::filesystem::path& shaderDirectory)

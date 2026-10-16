@@ -100,6 +100,8 @@ namespace r4d::d3d12
         void rasteriseSplats(UINT frameIndex);
         Status createSortPipelines(const std::filesystem::path& shaderDirectory);
         void sortSplats(UINT frameIndex);
+        UINT64 sortBufferBytes() const;
+        UINT64 pairBufferBytes() const;
         void renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
                           std::uint32_t& triangles);
         void renderShadowPass();

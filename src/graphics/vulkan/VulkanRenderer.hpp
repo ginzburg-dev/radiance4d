@@ -106,6 +106,8 @@ namespace r4d::vulkan
         Status createSplatDescriptors();
         Status createSortPipelines(const std::filesystem::path& shaderDirectory);
         Status createSortDescriptors();
+        VkDeviceSize sortBufferBytes() const;
+        VkDeviceSize pairBufferBytes() const;
         void destroySplatBuffers();
         void sortSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex);
         void rasteriseSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex);

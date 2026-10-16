@@ -49,3 +49,7 @@ tests/output/
 # Local scratch
 scratch/
 TODO.local
+
+# Python
+__pycache__/
+*.pyc

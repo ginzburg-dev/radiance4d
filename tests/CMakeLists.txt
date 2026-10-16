@@ -73,3 +73,16 @@ endforeach()
 foreach(test_src ${R4D_GPU_TESTS})
     r4d_add_test(${test_src} "gpu")
 endforeach()
+
+# The reconstruction tooling is Python and needs no build, but it is part of
+# the suite: its readers parse COLMAP bytes and its writer has to keep matching
+# what GaussianPlyLoader.cpp reads.
+find_package(Python3 3.10 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME Reconstruct_test
+             COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s tests -t .
+             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/reconstruct")
+    set_tests_properties(Reconstruct_test PROPERTIES LABELS "unit")
+else()
+    message(STATUS "  Reconstruct tests: skipped, no Python 3.10+ interpreter")
+endif()

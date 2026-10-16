@@ -34,6 +34,7 @@ namespace
         std::uint32_t width = 1600;
         std::uint32_t height = 900;
         bool vsync = true;
+        bool passTimings = true;
         bool debugLayer = true;
         bool gpuValidation = false;
         int logLevel = 2;
@@ -63,6 +64,8 @@ namespace
             "                       an index, or part of an adapter name\n"
             "  --width <n> --height <n>\n"
             "  --vsync / --no-vsync\n"
+            "  --no-pass-timings           drop the per-pass GPU timestamps, leaving\n"
+            "                              only the whole-frame pair\n"
             "  --debug / --no-debug         D3D12 debug layer (default: on)\n"
             "  --gpu-validation             GPU-based validation (slow; never benchmark)\n"
             "  --log-level <0..5>           0=trace 2=info 4=error\n"
@@ -133,6 +136,7 @@ namespace
             }
             else if (arg == "--vsync")      { options.vsync = true; }
             else if (arg == "--no-vsync")   { options.vsync = false; }
+            else if (arg == "--no-pass-timings") { options.passTimings = false; }
             else if (arg == "--debug")      { options.debugLayer = true; }
             else if (arg == "--no-debug")   { options.debugLayer = false; }
             else if (arg == "--gpu-validation") { options.gpuValidation = true; }
@@ -269,6 +273,8 @@ namespace
     {
         std::vector<double> cpu;
         std::vector<double> gpu;
+        // Per-pass GPU times, indexed by GpuPass. Empty unless the splat path ran.
+        std::array<std::vector<double>, r4d::kGpuPassCount> pass;
     };
 
     double percentile(std::vector<double> values, double fraction)
@@ -299,9 +305,11 @@ namespace
     {
         const auto& stats = gpu.stats();
         R4D_INFO("");
-        R4D_INFO("Benchmark: {} frames at {}x{}, {}, vsync {}, debug layer off",
+        R4D_INFO("Benchmark: {} frames at {}x{}, {}, vsync {}, debug layer off, "
+                 "pass timestamps {}",
                  samples.cpu.size(), stats.renderResolution.x, stats.renderResolution.y,
-                 r4d::ToString(gpu.backend()), options.vsync ? "on" : "off");
+                 r4d::ToString(gpu.backend()), options.vsync ? "on" : "off",
+                 options.passTimings ? "on" : "off");
         R4D_INFO("  adapter   {}", gpu.adapterInfo().name);
         R4D_INFO("  scene     {} draws, {} triangles",
                  stats.drawCalls, stats.triangles);
@@ -318,6 +326,25 @@ namespace
             R4D_INFO("  GPU  min {:.3f}  mean {:.3f}  p95 {:.3f} ms",
                      *std::min_element(samples.gpu.begin(), samples.gpu.end()),
                      mean(samples.gpu), percentile(samples.gpu, 0.95));
+        }
+        if (samples.pass[0].empty())
+        {
+            R4D_INFO("  splat passes  not measured");
+        }
+        else
+        {
+            double splatTotal = 0.0;
+            for (std::size_t pass = 0; pass < r4d::kGpuPassCount; ++pass)
+            {
+                const std::vector<double>& times = samples.pass[pass];
+                const double passMean = mean(times);
+                splatTotal += passMean;
+                R4D_INFO("    {:<10}  mean {:.3f}  p95 {:.3f} ms",
+                         r4d::gpuPassName(static_cast<r4d::GpuPass>(pass)), passMean,
+                         percentile(times, 0.95));
+            }
+            R4D_INFO("    {:<10}  mean {:.3f} ms of the frame", "splats total",
+                     splatTotal);
         }
         R4D_WARN("These are this machine only. Quote them with hardware, driver, "
                  "resolution, API and settings, or not at all.");
@@ -423,6 +450,7 @@ namespace
         desc.enableDebugLayer = options.debugLayer;
         desc.enableGpuValidation = options.gpuValidation;
         desc.vsync = options.vsync;
+        desc.passTimings = options.passTimings;
         desc.fixedTimeStep = options.fixedTimeStep;
         return desc;
     }
@@ -552,6 +580,13 @@ namespace
                 if (gpu.stats().gpuTimingsValid)
                 {
                     samples.gpu.push_back(gpu.stats().gpuFrameMs);
+                }
+                if (gpu.stats().gpuPassTimingsValid)
+                {
+                    for (std::size_t pass = 0; pass < r4d::kGpuPassCount; ++pass)
+                    {
+                        samples.pass[pass].push_back(gpu.stats().gpuPassMs[pass]);
+                    }
                 }
             }
         }

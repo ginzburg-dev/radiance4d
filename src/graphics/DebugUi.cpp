@@ -91,6 +91,18 @@ namespace r4d
             // Never show 0.00: the first frames genuinely have no measurement.
             ImGui::TextUnformatted("GPU     --");
         }
+        if (stats.gpuPassTimingsValid)
+        {
+            double splatTotal = 0.0;
+            for (std::size_t pass = 0; pass < kGpuPassCount; ++pass)
+            {
+                const auto name = gpuPassName(static_cast<GpuPass>(pass));
+                ImGui::Text("  %-10s %6.3f ms  (avg %6.3f)", name,
+                            stats.gpuPassMs[pass], stats.gpuPassAverageMs[pass]);
+                splatTotal += stats.gpuPassAverageMs[pass];
+            }
+            ImGui::Text("  %-10s %6.3f ms  (avg)", "Splats", splatTotal);
+        }
         ImGui::Text("Frame %llu", static_cast<unsigned long long>(stats.frameIndex));
 
         ImGui::Separator();

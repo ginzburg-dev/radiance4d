@@ -1,48 +1,38 @@
 # Radiance4D
 
-Hybrid real-time rendering and spatiotemporal reconstruction engine featuring 3D/4D Gaussian
-Splatting, photogrammetry, ray tracing, and temporal stability.
+[![Windows build and test](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml/badge.svg?branch=main)](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-C++20, with native Direct3D 12 and Vulkan backends.
+A real-time renderer that draws triangle meshes and 3D Gaussian splats in the same frame, on
+Direct3D 12 and Vulkan, from one set of HLSL sources.
 
-## Status
+Published Gaussian Splatting scenes load and render at a million splats in under ten milliseconds
+at 1080p, through a compute pipeline that culls, depth-sorts, bins into tiles and composites front
+to back.
 
-Milestone M3 complete, M4 under way. Features marked *planned* are not implemented.
+![INRIA train, 1.03M splats, with the per-pass overlay](docs/images/overlay.png)
 
-| Area | Status |
-|---|---|
-| Win32 platform layer, logging, timing | working |
-| D3D12 device, explicit adapter selection | working |
-| DirectX Agility SDK (retail 1.619.6) | working |
-| Enhanced Barriers | working |
-| Swapchain, frame synchronisation, resize | working |
-| Build-time HLSL to DXIL (DXC 1.9.2609) | working |
-| Debug layer, DRED, validation counters | working |
-| Indexed and non-indexed geometry | working |
-| GPU timestamp profiling | working |
-| Headless rendering and frame capture | working |
-| WARP image-regression tests, CI | working |
-| Depth buffering | working |
-| Orbit and free-fly cameras | working |
-| glTF loading (cgltf) | working |
-| PBR shading, analytic lights | working |
-| Base colour, metallic-roughness, normal and emissive maps | working |
-| ImGui statistics overlay | working (both backends) |
-| Image-based lighting (procedural sky) | working |
-| Shadow mapping (key light, PCF) | working |
-| Exposure control | working |
-| Vulkan backend (1.3, dynamic rendering, synchronization2) | working |
-| Cross-API image parity test | working |
-| 3D Gaussian Splatting (projection, sorting, compositing) | working (both backends) |
-| 3DGS `.ply` dataset loading | working (verified on the INRIA `train` and `truck` scenes, 1.03M and 2.54M splats) |
-| Spherical-harmonic colour (degree 3) | working (both backends) |
-| Splat GPU depth sorting | working (compute radix sort, both backends) |
-| Splat visibility culling, tiled binning | working (compute cull, 16x16 tiles, both backends) |
-| COLMAP sparse model to renderable splats | working (Python, no dependencies) |
-| COLMAP pose estimation, gsplat training | planned (M5), needs tools not installed here |
-| Hybrid mesh and Gaussian rendering | working (shared depth buffer) |
-| Temporal reprojection and denoising | planned (M7) |
-| Dynamic 4D Gaussians | planned (M8) |
+---
+
+## Features
+
+- Modern C++20, CMake, no engine or rendering framework underneath
+- Native Direct3D 12 and Vulkan 1.3 backends behind one narrow interface
+- One HLSL source compiled to both DXIL and SPIR-V by a vendored DXC
+- D3D12 Enhanced Barriers, the retail Agility SDK, DRED and validation counters
+- Vulkan dynamic rendering and synchronization2
+- 3D Gaussian Splatting end to end: covariance projection, compute culling, a GPU radix depth
+  sort, tile binning and a tile rasteriser with per-pixel early termination
+- 3DGS `.ply` datasets with degree-3 spherical harmonics, verified on published scenes
+- Hybrid rendering: splats and meshes share one depth buffer
+- Physically based shading with image-based lighting, shadow mapping and exposure control
+- glTF 2.0 loading, including emissive, normal and metallic-roughness maps
+- Per-pass GPU timestamps, in the overlay and in a reproducible benchmark mode
+- Headless rendering, frame capture and image-regression tests on WARP
+- Cross-API parity tests holding the two backends to the same image
+- Python tooling that turns a COLMAP sparse model into a renderable scene
+
+---
 
 ![Material grid](docs/images/material-grid.png)
 

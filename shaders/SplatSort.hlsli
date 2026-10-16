@@ -20,6 +20,8 @@
 #ifndef R4D_SPLATSORT_HLSLI
 #define R4D_SPLATSORT_HLSLI
 
+#include "Splat.hlsli"
+
 // One element per thread. Tiles of exactly this size let every kernel but the
 // key build run without bounds checks: the buffers are padded up to a whole
 // number of tiles and the padding carries the largest possible key.
@@ -55,6 +57,9 @@ RWStructuredBuffer<uint> g_valuesA   : register(u2);
 RWStructuredBuffer<uint> g_valuesB   : register(u3);
 RWStructuredBuffer<uint> g_histogram : register(u4);
 RWStructuredBuffer<uint> g_digitBase : register(u5);
+
+// Written by the cull pass, read by the draw.
+RWStructuredBuffer<SplatProjection> g_projections : register(u6);
 
 uint sortReadKey(uint i)
 {

@@ -20,4 +20,18 @@ struct Gaussian
     float  sh[R4D_SH_COEFFICIENTS * 3];
 };
 
+// What the cull pass leaves for the rasteriser: the splat already projected to
+// a screen-space conic, so the vertex shader reads it instead of rebuilding the
+// covariance once per corner.
+struct SplatProjection
+{
+    float2 screen;    // centre, in pixels
+    float  radius;    // half the quad, in pixels
+    float  depth;     // clip z/w, tested against the mesh pass
+    float3 conic;     // inverse 2D covariance
+    float  opacity;
+    float3 colour;    // spherical harmonics already evaluated
+    float  padding;
+};
+
 #endif

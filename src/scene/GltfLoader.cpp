@@ -214,6 +214,10 @@ namespace r4d
                                                  baseDirectory, false, textureCache);
             material.emissive = Vec3{source.emissive_factor[0], source.emissive_factor[1],
                                      source.emissive_factor[2]};
+            // The factor is a multiplier on the texture, not a value of its own:
+            // DamagedHelmet sets it to white and masks the glow with the map.
+            material.emissiveTexture = loadTexture(model, source.emissive_texture.texture,
+                                                   baseDirectory, true, textureCache);
             model.materials.push_back(material);
         }
 

@@ -8,6 +8,7 @@ ConstantBuffer<FrameConstants> g_frame : register(b0);
 ConstantBuffer<MaterialConstants> g_material : register(b1);
 
 Texture2D g_baseColour        : register(t0);
+Texture2D g_emissive         : register(t6);
 Texture2D g_metallicRoughness : register(t1);
 Texture2D g_normal            : register(t2);
 Texture2D g_environment       : register(t3);
@@ -191,7 +192,10 @@ float4 main(PSInput input) : SV_Target0
         g_environment.SampleLevel(g_environmentSampler, directionToEquirect(r), lod).rgb;
     radiance += environment * environmentBRDF(f0, roughness, nDotV) * g_frame.ambient;
 
-    radiance += g_material.emissive;
+    // glTF multiplies the factor by the map; without the map a white factor
+    // makes the whole surface a light source.
+    radiance += g_material.emissive *
+                g_emissive.Sample(g_sampler, input.uv).rgb;
 
     const float3 mapped = tonemap(radiance * g_frame.exposure);
     return float4(pow(mapped, 1.0f / 2.2f), base.a);

@@ -62,7 +62,7 @@ namespace r4d::vulkan
         constexpr std::uint32_t kTextureBinding = R4D_VK_T_SHIFT;
         constexpr std::uint32_t kSamplerBinding = R4D_VK_S_SHIFT;
         // base colour, metallic-roughness, normal, environment, irradiance, shadow
-        constexpr std::uint32_t kTexturesPerMaterial = 6;
+        constexpr std::uint32_t kTexturesPerMaterial = 7;
 
         // The splat shader's t0 and t1, moved by the same shift.
         constexpr std::uint32_t kGaussianBinding = R4D_VK_T_SHIFT;
@@ -2579,6 +2579,7 @@ namespace r4d::vulkan
             images[3].imageView = m_textures[3].view;   // environment
             images[4].imageView = m_textures[4].view;   // irradiance
             images[5].imageView = m_shadowMap.view;
+            images[6].imageView = pick(material.emissiveTexture, 0);
             for (VkDescriptorImageInfo& image : images)
             {
                 image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

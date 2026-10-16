@@ -39,6 +39,7 @@ namespace r4d
         std::int32_t baseColourTexture = -1;
         std::int32_t metallicRoughnessTexture = -1;
         std::int32_t normalTexture = -1;
+        std::int32_t emissiveTexture = -1;
     };
 
     // One draw: a contiguous index range sharing a material.

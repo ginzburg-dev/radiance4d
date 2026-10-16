@@ -53,8 +53,9 @@ namespace r4d::d3d12
 
         // Each material owns a contiguous triple of SRVs: base colour,
         // metallic-roughness, normal. Missing maps point at a default texture.
-        // base colour, metallic-roughness, normal, environment, irradiance, shadow
-        constexpr UINT kTexturesPerMaterial = 6;
+        // base colour, metallic-roughness, normal, environment, irradiance,
+        // shadow, emissive
+        constexpr UINT kTexturesPerMaterial = 7;
 
         static_assert(sizeof(MaterialConstants) % sizeof(UINT32) == 0);
         constexpr UINT kMaterialRootConstants = sizeof(MaterialConstants) / sizeof(UINT32);
@@ -1424,6 +1425,7 @@ namespace r4d::d3d12
         writeSrv(sky.value().Get());
         writeSrv(irradiance.value().Get());
         writeShadowSrv();
+        writeSrv(whiteSrgb.value().Get());   // emissive default
 
         for (const Material& material : model.materials)
         {
@@ -1441,6 +1443,7 @@ namespace r4d::d3d12
             writeSrv(sky.value().Get());
             writeSrv(irradiance.value().Get());
             writeShadowSrv();
+            writeSrv(pick(material.emissiveTexture, whiteSrgb.value().Get()));
         }
 
         R4D_INFO("Textures: {} uploaded, {} descriptors", model.textures.size(),

@@ -98,7 +98,22 @@ namespace r4d::vulkan
 
         // Both halves of the key and value ping-pong, the per-tile histograms
         // and the digit bases.
-        constexpr std::uint32_t kSortBufferCount = 6;
+        constexpr std::uint32_t kSortBufferCount = 7;
+
+        // Mirrors SplatProjection in Splat.hlsli. GPU-only, so only its size
+        // matters here, but the fields are named so the two can be compared.
+        struct SplatProjection
+        {
+            float screen[2];
+            float radius;
+            float depth;
+            float conic[3];
+            float opacity;
+            float colour[3];
+            float padding;
+        };
+        static_assert(sizeof(SplatProjection) == 48);
+
 
         // Orders every preceding access against every following one. The sort
         // stages each read what the one before wrote, across six buffers, which
@@ -1438,6 +1453,7 @@ namespace r4d::vulkan
             destroyBuffer(sort.valuesB);
             destroyBuffer(sort.histogram);
             destroyBuffer(sort.digitBase);
+            destroyBuffer(sort.projections);
         }
     }
 
@@ -1548,6 +1564,19 @@ namespace r4d::vulkan
                                      sort.histogram));
             R4D_TRY(createSortBuffer(kSortBuckets, "splat sort digit bases",
                                      sort.digitBase));
+
+            // One projection per real splat; the sort's padding never reaches
+            // the draw, so it needs none.
+            auto projections = createBuffer(
+                static_cast<VkDeviceSize>(count) * sizeof(SplatProjection),
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                "splat projections");
+            if (!projections)
+            {
+                return projections.error();
+            }
+            sort.projections = projections.value();
+
         }
 
         // A pass's constants never change once the count is known, so the whole
@@ -1632,7 +1661,7 @@ namespace r4d::vulkan
 
         // Indexed by SortStage, so the order of these must match the enum.
         static constexpr std::string_view kStageShaders[] = {
-            "SplatSortKey.cs.spv", "SplatSortHistogram.cs.spv",
+            "SplatCull.cs.spv", "SplatSortHistogram.cs.spv",
             "SplatSortScanRows.cs.spv", "SplatSortScanTotals.cs.spv",
             "SplatSortScatter.cs.spv"};
         static_assert(std::size(kStageShaders) ==
@@ -1692,10 +1721,11 @@ namespace r4d::vulkan
         for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
         {
             const SortBuffers& sort = m_sortBuffers[i];
-            // Must match the u0..u5 order in SplatSort.hlsli.
+            // Must match the u0..u6 order in SplatSort.hlsli.
             const Buffer* const sortBuffers[kSortBufferCount] = {
-                &sort.keysA,   &sort.keysB,     &m_gaussianOrder[i],
-                &sort.valuesB, &sort.histogram, &sort.digitBase};
+                &sort.keysA,    &sort.keysB,     &m_gaussianOrder[i],
+                &sort.valuesB,  &sort.histogram, &sort.digitBase,
+                &sort.projections};
 
             VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0,
                                              sizeof(FrameConstants)};
@@ -1765,7 +1795,7 @@ namespace r4d::vulkan
                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
         };
 
-        dispatch(SortStage::Key, 0, m_sortTileCount);
+        dispatch(SortStage::Cull, 0, m_sortTileCount);
         for (std::uint32_t pass = 0; pass < kSortPasses; ++pass)
         {
             dispatch(SortStage::Histogram, pass, m_sortTileCount);
@@ -1774,7 +1804,8 @@ namespace r4d::vulkan
             dispatch(SortStage::Scatter, pass, m_sortTileCount);
         }
 
-        // The order buffer is read by the vertex shader for the rest of the frame.
+        // The order and the projections are read by the vertex shader for the
+        // rest of the frame.
         memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                       VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
@@ -1808,7 +1839,8 @@ namespace r4d::vulkan
         for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
         {
             VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0, sizeof(FrameConstants)};
-            VkDescriptorBufferInfo gaussianInfo{m_gaussianBuffer.handle, 0, VK_WHOLE_SIZE};
+            VkDescriptorBufferInfo projectionInfo{m_sortBuffers[i].projections.handle, 0,
+                                                  VK_WHOLE_SIZE};
             VkDescriptorBufferInfo orderInfo{m_gaussianOrder[i].handle, 0, VK_WHOLE_SIZE};
 
             VkWriteDescriptorSet writes[3]{};
@@ -1823,7 +1855,8 @@ namespace r4d::vulkan
                 writes[index].pBufferInfo = buffer;
             };
             write(0, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &frameInfo);
-            write(1, kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &gaussianInfo);
+            write(1, kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  &projectionInfo);
             write(2, kGaussianOrderBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &orderInfo);
 
             vkUpdateDescriptorSets(m_context.device,

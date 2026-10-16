@@ -188,7 +188,7 @@ namespace r4d::vulkan
         // runs once per frame rather than once per pass.
         enum class SortStage : std::size_t
         {
-            Key,
+            Cull,
             Histogram,
             ScanRows,
             ScanTotals,
@@ -206,6 +206,9 @@ namespace r4d::vulkan
             Buffer valuesB;
             Buffer histogram;
             Buffer digitBase;
+            // One projection per splat, written by the cull pass and read
+            // by the vertex shader.
+            Buffer projections;
         };
         std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
         VkDescriptorSetLayout m_sortSetLayout = VK_NULL_HANDLE;

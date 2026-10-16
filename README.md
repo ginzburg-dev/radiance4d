@@ -37,7 +37,7 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 | 3DGS `.ply` dataset loading | working (verified on the INRIA `train` and `truck` scenes, 1.03M and 2.54M splats) |
 | Spherical-harmonic colour (degree 3) | working (both backends) |
 | Splat GPU depth sorting | working (compute radix sort, both backends) |
-| Splat visibility culling, tiled binning | planned (M4) |
+| Splat visibility culling, tiled binning | working (compute cull, 16x16 tiles, both backends) |
 | COLMAP sparse model to renderable splats | working (Python, no dependencies) |
 | COLMAP pose estimation, gsplat training | planned (M5), needs tools not installed here |
 | Hybrid mesh and Gaussian rendering | working (shared depth buffer) |
@@ -209,14 +209,15 @@ radiance4d_viewer.exe --headless --splat-ply path/to/point_cloud.ply --orbit-yaw
 That command produced the image above, on an RTX 3080 Laptop GPU (driver 617.14) in a Debug build
 with the D3D12 debug layer on, and two runs of it are byte-identical. Rendered the same way on
 Vulkan, with the validation layer on, both backends report zero validation errors and the two
-captures agree to a max channel delta of 2, RMSE 0.0447, with 4,508 of 921,600 pixels differing
-(0.49%).
+captures agree to a max channel delta of 1, RMSE 0.0121, with 392 of 921,600 pixels differing
+(0.04%).
 
-The streaking along the bottom edge and across the sky is not a rendering defect to fix in the
-projection: those are the handful of splats with very large scales (the largest linear scale in
-this file is 16.2 units against a median of 0.016, and 1% of them exceed 0.37), seen from a camera standing among them. A
-visibility pass that drops splats whose screen-space extent is implausible is M4 work that has not
-been done.
+The streaking along the bottom edge and across the sky is a camera standing among splats with very
+large scales — the largest linear scale in this file is 16.2 units against a median of 0.016, and
+1% of them exceed 0.37. Part of it is now gone: the cull pass weights a splat by how much of its
+projection still holds at the distance it is being viewed from, which takes out the ones the camera
+is effectively inside. What is left is not a projection defect and no rejection rule reaches it;
+the measurements that say so are under *The default view is still not a picture* below.
 
 `truck` hits the same defect, and harder. At its framing camera every pixel of the 1280x720 capture
 lands between 253 and 255 on all three channels: 100% of pixels at or above 250, standard deviation
@@ -284,9 +285,10 @@ measured frames:
 | INRIA `truck`, 2.54M splats, GPU sort | 1920x1080 | Vulkan | 14.045 ms | 14.018 ms |
 
 The `train` and `truck` rows at 1920x1080 were measured before the pair capacity was made to follow
-demand, so every one of them rendered that view without its nearest splats; the corrected per-pass
-figures are further down. They are left as measured rather than restated, because what they record
-is what those builds did.
+demand, so every one of them rendered that view without its nearest splats; and both predate the
+two rejections the cull pass now makes, which took the whole frame back down. The corrected
+per-pass figures are further down. They are left as measured rather than restated, because what
+they record is what those builds did.
 
 **What these do and do not show.** The mesh scene never loads the GPU: 1.18 million triangles cost
 0.41 ms, and quadrupling the pixel count to 4K only reaches 0.57 ms, so the frame is bounded by
@@ -540,19 +542,110 @@ At 1280x720 `--orbit-yaw 150`, which does not overflow and never grows, every pa
 is not needed. The one-off growth is 48.9 to 53.4 ms on D3D12 and 31.2 to 31.8 on Vulkan, most of
 it the queue drain, and it happens inside the benchmark's 64 warm-up frames.
 
-**The 1080p image changes on 73.7% of its pixels, and it looks worse.** That is the honest result
-and it is worth being plain about. The splats the overflow was dropping are the nearest ones, and
+**The 1080p image changed on 73.7% of its pixels, and it looked worse.** That was the honest result
+and it was worth being plain about. The splats the overflow was dropping are the nearest ones, and
 in this scene the nearest ones are the huge-scale splats that produce the streaking already noted
 above — seen from inside the scene, a splat with a very large scale smears across the frame. The
-overflow had been acting as an accidental declutter, and removing it reveals a defect that was
-always there. The fix is correct: the output is now byte-identical, on both backends, to a build
-given capacity to spare, which is what the scene actually contains. The streaking is a separate
-open defect, and the rows above are the first ones here measured on a view that is not missing
-splats.
+overflow had been acting as an accidental declutter, and removing it revealed a defect that was
+always there. That fix was correct: the output became byte-identical, on both backends, to a build
+given capacity to spare, which is what the scene actually contains. What the cull pass now does
+about the streaking is below.
 
-The 1280x720 `--orbit-yaw 150` screenshot does not move. It was verified byte-identical on both
-backends rather than assumed, because that view never overflowed. The stored WARP reference did not
-move either — `SplatRender_test` renders small enough that its capacity is never reached.
+The 1280x720 `--orbit-yaw 150` screenshot did not move at that point. It was verified
+byte-identical on both backends rather than assumed, because that view never overflowed. The
+stored WARP reference did not move either — `SplatRender_test` renders small enough that its
+capacity is never reached.
+
+**Two rejections the cull pass was not making.** Both are in `shaders/SplatCull.cs.hlsl` and they
+are different kinds of thing, so they went in separately.
+
+The first is exact. The rasteriser discards any sample whose alpha is under 1/255, and a splat's
+alpha never exceeds its stored opacity, so a splat stored below that floor cannot colour a pixel
+from any camera. The cull pass never tested it: 76,594 of `train`'s 1,026,508 splats are stored
+under it, and each was being projected, depth sorted, binned, sorted again and read back by the
+rasteriser to be thrown away. Output is byte-identical on both backends at both views, because the
+rejection is exact. The pairs are not: `train` at 1920x1080 drops from 8,902,955 to 8,188,478,
+which is below the 8,212,224 it starts with, so **the default view no longer grows the pair buffers
+at all**. `truck` sheds 661,018 of 6,776,386.
+
+The second is the streaking, and it is not exact. The Jacobian linearises the perspective divide at
+the splat's centre; across the splat's own depth extent it drops the terms quadratic in the depth
+offset, and because a Gaussian is symmetric in depth the first-order over- and under-magnification
+cancel, so the error left in the projected covariance goes as (σ_z / z)². Written in the
+three-sigma extent the renderer already uses for the radius and the quad, that ratio reaches 1 when
+the near end of the extent touches the eye plane — the camera is inside the splat and the
+projection means nothing. The pass weights opacity by how much of the linearisation survives, which
+costs a splat a tenth of its depth away one per cent and takes the ones the camera has walked into
+to zero. Both ends come from that convention, not from a number chosen to suit a picture.
+
+It was picked over the alternatives because it is a property of the projection rather than of the
+camera's luck, which is measurable: the fifty splats with the largest quad in the default 1080p
+view have a median radius of 1,659 px and a ratio of 0.899 there, and from the 1280x720 screenshot
+view the same fifty splats are 64.7 px and 0.083. A world-scale rejection at load cannot see that,
+and it does not transfer between scenes — a scale ceiling taking 6.5% of `train`'s pairs takes 9.1%
+of `truck`'s, whose scene is five times the size. A screen-radius ceiling cuts by the symptom and
+risks popping; this fade is smooth in the camera's position, and over a 0.05° yaw sweep around the
+screenshot view the step-to-step mean change falls from 1.77–1.87 to 1.42–1.44 levels, with no step
+standing out from its neighbours.
+
+`train`, `--benchmark 200`, mean of three runs per build interleaved with the build before both
+changes:
+
+| Pass | D3D12 before | D3D12 after | Vulkan before | Vulkan after |
+|---|---|---|---|---|
+| Cull | 0.912 ms | 0.839 ms | 0.746 ms | 0.747 ms |
+| Depth sort | 0.828 ms | 0.799 ms | 0.747 ms | 0.724 ms |
+| Binning | 1.449 ms | 1.301 ms | 1.324 ms | 1.189 ms |
+| Tile sort | 3.057 ms | 2.760 ms | 4.397 ms | 3.992 ms |
+| Rasterise | 4.409 ms | 4.046 ms | 4.117 ms | 3.769 ms |
+| Composite | 0.033 ms | 0.034 ms | 0.033 ms | 0.033 ms |
+| whole-frame pair | 10.696 ms | 9.785 ms | 11.374 ms | 10.466 ms |
+
+The frame is 0.91 ms cheaper on both backends, which is almost exactly the 0.86 and 0.95 ms that
+sizing the pairs to demand had cost — the work comes back off because the two rejections together
+take `train` at 1080p from 8,902,955 pairs to 8,119,035, 8.8% fewer to make, sort and walk. The
+composite is the control at ±0.000 ms. At 1280x720 `--orbit-yaw 150`, where the pairs go 4,547,915
+to 4,105,700, the frame goes 7.006 to 6.321 ms on D3D12 and 6.918 to 6.307 on Vulkan; `truck` at
+1080p goes 6,776,386 to 6,107,669.
+
+The 1280x720 screenshot does move this time, and it improves: 72.4% of pixels differ but at a mean
+of 1.8 levels and a maximum of 35. The change is a haze lifting — the white wash over the sky
+thins and the hillside behind it comes through, and the largest differences are in the foreground
+gravel along the bottom. `docs/images/train-dataset.png` was retaken with the command printed
+beside it. Cross-backend agreement on that view improves with it, from max channel delta 2 /
+RMSE 0.0447 / 4,508 pixels to delta 1 / RMSE 0.0121 / 392 pixels.
+The stored WARP reference moved by one level on 1,592 of 230,400 pixels, RMSE 0.0427 — inside the
+tolerance `SplatRender_test` already allowed, so the test passed either way, but it was retaken so
+the reference stays exact rather than merely passing. `truck` at 1280x720 changes by a mean of 1.6
+levels with cross-backend parity unchanged at 492 of 921,600 pixels.
+
+**The default view is still not a picture, and here is why no rule fixes it.** Being plain about
+this matters more than the part that worked. The fade removes 13.0% of the ink laid in front of the
+subject at the default 1080p framing, and that 13% is the frame-wide blobs; the locomotive is less
+obscured than it was and still not legible. The reason is in the distribution. Compositing the
+nearest 40,000 splats front to back exactly as the rasteriser does, they block 75.6% of the frame,
+and the ink is not concentrated in a handful: 6 splats lay the first 25% of it, but 47 are needed
+for half, 302 for three quarters and 1,134 for 90%. Nor is it the large splats alone — 39% of that
+ink comes from splats whose radius is under a tenth of the screen diagonal, which is the size the
+legible view's foreground gravel is made of. A screen-radius ceiling at that tenth was tried as a
+probe: it cuts 834 splats and 60% of the near-field ink and the frame is still unreadable.
+
+What is actually in the way is geometry. At the default framing 34,658 splats stand between the
+camera and the subject, against 6,487 at the screenshot view, and they are opaque, close to
+circular on screen and correctly projected — the same kind of splat the ground is made of, placed
+where no training camera stood. Culling everything nearer than the subject renders the locomotive
+cleanly, which is the proof that nothing behind the near layer is wrong; but that cull is a world
+distance picked for one camera and it would delete the foreground of the view that works. So the
+honest statement is that the remaining obstruction is not a defect in the renderer's projection,
+and the fix for it is not a rejection rule. `--orbit-yaw 150` is the documented way to aim at this
+scene, and `truck`'s default framing has the same problem for the same reason.
+
+Those per-splat figures come from an offline replica of `SplatCull.cs.hlsl` — the same `.ply`
+conversion, the same framing camera, the same covariance projection — because the shader itself
+reports nothing per splat. It is not taken on trust: against the GPU's own pair totals it predicts
+8,119,046 for the default 1080p view where the GPU reads 8,119,035, 4,105,702 against 4,105,700 at
+720p, and 6,107,667 against 6,107,669 on `truck`, which is eleven pairs in 8.1 million and is float
+rounding. The timings, the images and the pair totals above are the GPU's.
 
 A sampling profiler is still outstanding. This attributes GPU time per pass, not per instruction,
 and it cannot say why a pass costs what it does.

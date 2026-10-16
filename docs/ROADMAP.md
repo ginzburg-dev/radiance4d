@@ -265,14 +265,60 @@ rasteriser composites the splats that were missing. The other three move by at m
 1280x720 `--orbit-yaw 150`, which neither overflows nor grows, every pass moves by at most 0.018 ms
 and the frame by −0.016 and −0.022: the change costs nothing where it is not needed.
 
-The 1080p image changes on 73.7% of its pixels and it looks worse, which is the honest result. The
-splats the overflow dropped are the nearest, and the nearest here are the huge-scale ones that
+The 1080p image changed on 73.7% of its pixels and it looked worse, which was the honest result.
+The splats the overflow dropped are the nearest, and the nearest here are the huge-scale ones that
 produce the streaking already noted: seen from inside the scene they smear across the frame. The
-overflow had been an accidental declutter, and removing it exposes a defect that was always there.
-The output is byte-identical, on both backends, to a build given capacity to spare, so the fix is
-right and the streaking is a separate open defect. The 1280x720 `--orbit-yaw 150` screenshot was
-verified byte-identical on both backends rather than assumed, and the stored WARP reference did not
-move — `SplatRender_test` renders small enough never to reach its capacity.
+overflow had been an accidental declutter, and removing it exposed a defect that was always there.
+The output became byte-identical, on both backends, to a build given capacity to spare, so the fix
+was right. The 1280x720 `--orbit-yaw 150` screenshot was verified byte-identical on both backends
+rather than assumed, and the stored WARP reference did not move — `SplatRender_test` renders small
+enough never to reach its capacity.
+
+The cull pass then took on the streaking, and makes two rejections it was not making before.
+
+The first is exact and was simply missing: the rasteriser discards any sample under 1/255 alpha,
+and a splat's alpha never exceeds its stored opacity, so a splat below that floor cannot colour a
+pixel from any camera. 76,594 of `train`'s 1,026,508 splats are stored under it, and every one was
+being projected, sorted, binned, sorted again and read back to be discarded. Output is
+byte-identical on both backends because the rejection is exact; `train` at 1080p drops from
+8,902,955 pairs to 8,188,478, under the 8,212,224 it starts with, so the default view no longer
+grows the pair buffers at all, and `truck` sheds 661,018 of 6,776,386.
+
+The second weights a splat by how much of the Jacobian's linearisation still holds across its own
+depth extent. The linearisation drops the terms quadratic in the depth offset and, a Gaussian being
+symmetric in depth, the first-order over- and under-magnification cancel, so the error left in the
+projected covariance goes as (σ_z / z)²; in the three-sigma extent the renderer already uses for
+the radius and the quad, that ratio is 1 exactly when the near end of the extent reaches the eye
+plane. Weighting by what survives costs a splat a tenth of its depth away one per cent and takes
+the ones the camera is inside to zero, with both ends set by that convention rather than chosen.
+It was preferred to a world-scale rejection at load, which cannot see that the fifty worst splats
+in the default view are 64.7 px and perfectly ordinary from the screenshot view and does not
+transfer between scenes (a ceiling costing `train` 6.5% of its pairs costs `truck` 9.1%), and to a
+screen-radius ceiling, which cuts by the symptom; the fade is smooth in the camera's position, and
+over a 0.05° yaw sweep the step-to-step change falls from 1.77–1.87 to 1.42–1.44 levels.
+
+Together they take the 1080p frame from 10.696 to 9.785 ms on D3D12 and 11.374 to 10.466 on
+Vulkan, which returns the 0.86 and 0.95 ms that sizing the pairs to demand had cost; the composite
+is the control at ±0.000 ms. 720p `--orbit-yaw 150` goes 7.006 to 6.321 and 6.918 to 6.307. The
+screenshot moves this time and improves — 72.4% of pixels at a mean of 1.8 levels, the haze over
+the sky lifting — and was retaken; cross-backend agreement on it goes from max delta 2 / RMSE
+0.0447 over 0.49% of pixels to delta 1 / RMSE 0.0121 over 0.04%. The WARP reference moved by one
+level over 1,592 of 230,400 pixels, inside the tolerance the test already allowed, and was retaken
+so it stays exact.
+
+**It does not make the default view legible, and that is the part worth recording.** The fade
+removes 13.0% of the ink laid in front of the subject there, and that 13% is the frame-wide blobs.
+The rest is not reachable by any rejection rule. Compositing the nearest 40,000 splats front to
+back as the rasteriser does, they block 75.6% of the frame, and the ink needs 6 splats for the
+first quarter but 47 for half, 302 for three quarters and 1,134 for 90% — a long tail, not a
+handful. 39% of it comes from splats under a tenth of the screen diagonal in radius, the size the
+working view's foreground is made of, and a probe cutting at that tenth removes 834 splats and 60%
+of the near-field ink and still leaves the frame unreadable. What is in the way is 34,658 splats of
+ordinary opaque geometry standing between the camera and the locomotive, against 6,487 at the
+screenshot view; culling everything nearer than the subject renders the scene cleanly, which proves
+nothing behind them is wrong, but that is a world distance picked for one camera and it would
+delete the foreground of the view that works. `--orbit-yaw 150` remains the documented way to aim
+at this scene, and `truck`'s default framing fails the same way for the same reason.
 
 One incidental finding: moving those buffer allocations to the end of the Vulkan upload sequence,
 which is where a growable helper naturally puts them, cost 0.497 ms of tile sort at 720p with no
@@ -325,8 +371,9 @@ both are now done:
   the angle that suits `train` is written down in the README beside the capture command.
 
 `docs/images/train-dataset.png` is that capture: 1280x720, Debug, zero validation errors on both
-backends, D3D12 against Vulkan at max channel delta 2 / RMSE 0.0447 over 0.49% of pixels, and
-byte-identical between two runs of the same command.
+backends, D3D12 against Vulkan at max channel delta 1 / RMSE 0.0121 over 0.04% of pixels, and
+byte-identical between two runs of the same command. It was retaken when the cull pass began
+fading splats by their projection's validity, which is further up this section.
 
 `truck` reproduces the first of those and adds a third. Its un-clamped capture is a featureless
 white field — every pixel between 253 and 255 on all three channels — so the D3D12-against-Vulkan

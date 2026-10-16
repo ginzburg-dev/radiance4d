@@ -142,6 +142,7 @@ namespace r4d::d3d12
         ComPtr<ID3D12DescriptorHeap> m_uiHeap;
         std::function<void()> m_uiCallback;
         bool m_uiReady = false;
+        bool m_uiHasWindow = false;
         UINT m_srvDescriptorSize = 0;
         std::vector<ComPtr<ID3D12Resource>> m_textures;
         UINT m_rtvDescriptorSize = 0;

@@ -41,6 +41,7 @@ namespace
         std::uint64_t frameLimit = 0;
         std::uint32_t resizeCycles = 0;
         bool headless = false;
+        bool overlay = false;
         std::string scenePath;
         std::string outputPath;
         double fixedTimeStep = 0.0;
@@ -74,6 +75,8 @@ namespace
             "  --resize-cycles <n>          cycle through window sizes n times\n"
             "  --scene <file.gltf>          load a glTF or glb scene\n"
             "  --headless                   no window; render to an offscreen target\n"
+            "  --overlay                    draw the statistics overlay into a\n"
+            "                               headless capture, for documentation\n"
             "  --out <file.png>             write the last rendered frame as a PNG\n"
             "  --splats <n>                 render n procedural 3D Gaussians; without\n"
             "                               --scene they replace the mesh scene\n"
@@ -163,6 +166,10 @@ namespace
             else if (arg == "--gpu-validation")
             {
                 options.gpuValidation = true;
+            }
+            else if (arg == "--overlay")
+            {
+                options.overlay = true;
             }
             else if (arg == "--headless")
             {
@@ -503,6 +510,7 @@ namespace
         desc.enableGpuValidation = options.gpuValidation;
         desc.vsync = options.vsync;
         desc.passTimings = options.passTimings;
+        desc.overlay = options.overlay;
         desc.fixedTimeStep = options.fixedTimeStep;
         return desc;
     }
@@ -604,6 +612,19 @@ namespace
         Camera camera;
         camera.setAspect(static_cast<float>(options.width) /
                          static_cast<float>(options.height));
+
+        if (options.overlay)
+        {
+            gpu.setUiCallback(
+                [&]()
+                {
+                    RenderSettings settings = gpu.renderSettings();
+                    drawStatsWindow(gpu.stats(), gpu.adapterInfo(), gpu.capabilities(),
+                                    std::string{ToString(gpu.backend())}, gpu.vsync(),
+                                    std::string{ToString(camera.mode())}, settings);
+                });
+        }
+
         if (!setupScene(gpu, camera, options))
         {
             return 1;

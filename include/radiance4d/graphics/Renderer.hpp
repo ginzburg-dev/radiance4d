@@ -41,6 +41,10 @@ namespace r4d
         // reports gpuFrameMs, which is how the scopes' own cost is measured.
         bool passTimings = true;
 
+        // Draw the overlay into a headless capture. Off by default: the
+        // image-regression references are of the scene, not of the UI.
+        bool overlay = false;
+
         // Seconds per frame instead of the wall clock. Required for a
         // reproducible capture.
         double fixedTimeStep = 0.0;

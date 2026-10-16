@@ -400,7 +400,7 @@ namespace r4d::d3d12
         R4D_TRY(createSplatPipeline(shaderDirectory));
         R4D_TRY(createSortPipelines(shaderDirectory));
 
-        if (!m_headless)
+        if (!m_headless || desc.overlay)
         {
             R4D_TRY(initialiseUi(desc.windowHandle));
         }
@@ -436,10 +436,13 @@ namespace r4d::d3d12
         ImGui::StyleColorsDark();
         ImGui::GetIO().IniFilename = nullptr;
 
-        if (!ImGui_ImplWin32_Init(windowHandle))
+        // Headless has no window, and the win32 backend only supplies input and
+        // timing; the overlay draws without it.
+        if (windowHandle != nullptr && !ImGui_ImplWin32_Init(windowHandle))
         {
             return makeError(ErrorCode::ApiCallFailed, "ImGui_ImplWin32_Init failed");
         }
+        m_uiHasWindow = windowHandle != nullptr;
 
         ImGui_ImplDX12_InitInfo info{};
         info.Device = m_device.Get();
@@ -471,7 +474,10 @@ namespace r4d::d3d12
         }
         m_uiReady = false;
         ImGui_ImplDX12_Shutdown();
-        ImGui_ImplWin32_Shutdown();
+        if (m_uiHasWindow)
+        {
+            ImGui_ImplWin32_Shutdown();
+        }
         ImGui::DestroyContext();
         m_uiHeap.Reset();
     }
@@ -484,7 +490,17 @@ namespace r4d::d3d12
         }
 
         ImGui_ImplDX12_NewFrame();
-        ImGui_ImplWin32_NewFrame();
+        if (m_uiHasWindow)
+        {
+            ImGui_ImplWin32_NewFrame();
+        }
+        else
+        {
+            ImGuiIO& io = ImGui::GetIO();
+            io.DisplaySize = ImVec2(static_cast<float>(m_size.x),
+                                    static_cast<float>(m_size.y));
+            io.DeltaTime = 1.0f / 60.0f;
+        }
         ImGui::NewFrame();
 
         if (m_uiCallback)

@@ -167,7 +167,7 @@ namespace r4d::d3d12
         // runs once per frame rather than once per pass.
         enum class SortStage : std::size_t
         {
-            Key,
+            Cull,
             Histogram,
             ScanRows,
             ScanTotals,
@@ -185,6 +185,9 @@ namespace r4d::d3d12
             ComPtr<ID3D12Resource> valuesB;
             ComPtr<ID3D12Resource> histogram;
             ComPtr<ID3D12Resource> digitBase;
+            // One projection per splat, written by the cull pass and read
+            // by the vertex shader.
+            ComPtr<ID3D12Resource> projections;
         };
         std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
         ComPtr<ID3D12RootSignature> m_sortRootSignature;

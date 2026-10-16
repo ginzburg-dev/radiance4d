@@ -87,7 +87,22 @@ namespace r4d::d3d12
 
         // One root descriptor per buffer the sort binds: both halves of the
         // key and value ping-pong, the per-tile histograms and the digit bases.
-        constexpr UINT kSortUavCount = 6;
+        constexpr UINT kSortUavCount = 7;
+
+        // Mirrors SplatProjection in Splat.hlsli. GPU-only, so only its size
+        // matters here, but the fields are named so the two can be compared.
+        struct SplatProjection
+        {
+            float screen[2];
+            float radius;
+            float depth;
+            float conic[3];
+            float opacity;
+            float colour[3];
+            float padding;
+        };
+        static_assert(sizeof(SplatProjection) == 48);
+
 
         // Must match the optimised clear value the render target is created with.
         constexpr float kClearColour[4] = {0.043f, 0.047f, 0.063f, 1.0f};
@@ -1543,6 +1558,19 @@ namespace r4d::d3d12
                                      sort.histogram));
             R4D_TRY(createSortBuffer(kSortBuckets, L"Radiance4D Splat Sort Digit Bases",
                                      sort.digitBase));
+
+            // One projection per real splat; the sort's padding never reaches
+            // the draw, so it needs none.
+            auto projectionDesc =
+                bufferDesc(static_cast<UINT64>(count) * sizeof(SplatProjection));
+            projectionDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+            R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+                                                     &projectionDesc,
+                                                     D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                                     IID_PPV_ARGS(&sort.projections)),
+                   "CreateCommittedResource (splat projections)");
+            sort.projections->SetName(L"Radiance4D Splat Projections");
+
         }
 
         auto& frame = m_frames[0];
@@ -1612,8 +1640,10 @@ namespace r4d::d3d12
             2, m_gaussianBuffer->GetGPUVirtualAddress());
 
         ID3D12Resource* const buffers[kSortUavCount] = {
-            sort.keysA.Get(),     sort.keysB.Get(),     m_gaussianOrder[frameIndex].Get(),
-            sort.valuesB.Get(),   sort.histogram.Get(), sort.digitBase.Get()};
+            sort.keysA.Get(),       sort.keysB.Get(),
+            m_gaussianOrder[frameIndex].Get(), sort.valuesB.Get(),
+            sort.histogram.Get(),   sort.digitBase.Get(),
+            sort.projections.Get()};
         for (UINT i = 0; i < kSortUavCount; ++i)
         {
             m_commandList->SetComputeRootUnorderedAccessView(
@@ -1637,7 +1667,7 @@ namespace r4d::d3d12
                                 D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
         };
 
-        dispatch(SortStage::Key, m_sortTileCount);
+        dispatch(SortStage::Cull, m_sortTileCount);
         for (UINT pass = 0; pass < kSortPasses; ++pass)
         {
             constants.shift = pass * kSortDigitBits;
@@ -1649,19 +1679,22 @@ namespace r4d::d3d12
             dispatch(SortStage::Scatter, m_sortTileCount);
         }
 
-        D3D12_BUFFER_BARRIER barrier{};
-        barrier.SyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-        barrier.SyncAfter = D3D12_BARRIER_SYNC_VERTEX_SHADING;
-        barrier.AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-        barrier.AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-        barrier.pResource = m_gaussianOrder[frameIndex].Get();
-        barrier.Offset = 0;
-        barrier.Size = UINT64_MAX;
+        D3D12_BUFFER_BARRIER barriers[2]{};
+        barriers[0].SyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+        barriers[0].SyncAfter = D3D12_BARRIER_SYNC_VERTEX_SHADING;
+        barriers[0].AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+        barriers[0].AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+        barriers[0].pResource = m_gaussianOrder[frameIndex].Get();
+        barriers[0].Offset = 0;
+        barriers[0].Size = UINT64_MAX;
+
+        barriers[1] = barriers[0];
+        barriers[1].pResource = sort.projections.Get();
 
         D3D12_BARRIER_GROUP group{};
         group.Type = D3D12_BARRIER_TYPE_BUFFER;
-        group.NumBarriers = 1;
-        group.pBufferBarriers = &barrier;
+        group.NumBarriers = static_cast<UINT32>(std::size(barriers));
+        group.pBufferBarriers = barriers;
         m_commandList->Barrier(1, &group);
     }
 
@@ -1676,15 +1709,17 @@ namespace r4d::d3d12
         // Alpha compositing is order-dependent, so the splats go far to near.
         // sortSplats produced that order on the GPU earlier in this frame.
         auto& frame = m_frames[frameIndex];
+        const SortBuffers& sort = m_sortBuffers[frameIndex];
         m_commandList->SetPipelineState(m_splatPipeline.Get());
         m_commandList->SetGraphicsRootSignature(m_splatRootSignature.Get());
         m_commandList->SetGraphicsRootConstantBufferView(
             0, frame.constantBuffer->GetGPUVirtualAddress());
         m_commandList->SetGraphicsRootShaderResourceView(
-            1, m_gaussianBuffer->GetGPUVirtualAddress());
+            1, sort.projections->GetGPUVirtualAddress());
         m_commandList->SetGraphicsRootShaderResourceView(
             2, m_gaussianOrder[frameIndex]->GetGPUVirtualAddress());
         m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
         m_commandList->DrawInstanced(4, m_gaussianCount, 0, 0);
 
         ++drawCalls;
@@ -1754,7 +1789,7 @@ namespace r4d::d3d12
 
         // Indexed by SortStage, so the order of these must match the enum.
         static constexpr std::string_view kStageShaders[] = {
-            "SplatSortKey.cs.dxil", "SplatSortHistogram.cs.dxil",
+            "SplatCull.cs.dxil", "SplatSortHistogram.cs.dxil",
             "SplatSortScanRows.cs.dxil", "SplatSortScanTotals.cs.dxil",
             "SplatSortScatter.cs.dxil"};
         static_assert(std::size(kStageShaders) ==

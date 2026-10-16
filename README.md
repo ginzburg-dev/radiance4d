@@ -13,6 +13,29 @@ through a compute pipeline that culls, depth-sorts, bins into tiles and composit
 
 ---
 
+## What it is for
+
+Photogrammetry turns a real place into something that looks right from any angle, but what it
+produces is a cloud of Gaussians, not geometry. Everything authored — characters, props, vehicles,
+set pieces — is triangles. Tools handle one or the other: splat viewers cannot light or intersect a
+mesh, and engines treat splats as an import rather than a first-class primitive.
+
+Radiance4D draws both in one frame, sharing one depth buffer, so a captured location becomes a set
+you can put things into:
+
+- **Virtual production and previs** — walk a scanned location in real time and place virtual
+  geometry in it, with the capture occluding and being occluded correctly
+- **VFX layout** — a photographed environment as a live backdrop for a CG element, instead of a
+  flat plate
+- **Digital twins and inspection** — a captured site with CAD or annotations composited on top
+- **Research and tooling** — a complete, readable Gaussian Splatting pipeline to build on
+
+The reference Gaussian Splatting implementation is CUDA, which ties it to one vendor. This one is
+HLSL compiled to both DXIL and SPIR-V, so the same pipeline runs under Direct3D 12 and Vulkan — and
+the test suite runs it on WARP, Microsoft's software rasteriser, with no GPU present at all.
+
+---
+
 ## Features
 
 - Modern C++20, CMake, no engine or rendering framework underneath

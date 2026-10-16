@@ -73,7 +73,7 @@ namespace r4d
 
         ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(340.0f, 0.0f), ImGuiCond_FirstUseEver);
-        if (!ImGui::Begin("Radiance4D"))
+        if (!ImGui::Begin("Radiance4D", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
             ImGui::End();
             return;
@@ -115,6 +115,18 @@ namespace r4d
         ImGui::Text("Triangles  %u", stats.triangles);
         ImGui::Text("Camera     %s", cameraMode.c_str());
 
+        ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+        if (ImGui::CollapsingHeader("Controls"))
+        {
+            ImGui::TextUnformatted("LMB drag    orbit");
+            ImGui::TextUnformatted("RMB drag    pan");
+            ImGui::TextUnformatted("Wheel       zoom");
+            ImGui::TextUnformatted("F2          orbit / free-fly");
+            ImGui::TextUnformatted("WASD QE     move, in free-fly");
+            ImGui::TextUnformatted("F1          vsync");
+            ImGui::TextUnformatted("Esc         quit");
+        }
+
         if (ImGui::CollapsingHeader("Device"))
         {
             ImGui::Text("Feature level  %s", capabilities.featureLevel.c_str());
@@ -132,10 +144,6 @@ namespace r4d
         ImGui::SliderFloat("Exposure", &settings.exposure, 0.02f, 3.0f, "%.3f",
                            ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Ambient", &settings.ambientIntensity, 0.0f, 2.0f);
-
-        ImGui::Separator();
-        ImGui::TextUnformatted("Esc quit   F1 vsync   F2 camera");
-        ImGui::TextUnformatted("LMB orbit   RMB pan   wheel zoom");
 
         ImGui::End();
     }

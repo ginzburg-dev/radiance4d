@@ -4,9 +4,9 @@
 // so the pairs come out in depth order and a stable sort by tile keeps them
 // that way inside each tile.
 //
-// Threads past the splats fill the rest of the capacity with the largest tile
-// id, which sorts behind every real pair and is ignored when the ranges are
-// found. That is also what clears the previous frame's pairs.
+// Threads past the splats pad the window out to a whole group with the largest
+// tile id, which sorts behind every real pair and is ignored when the ranges
+// are found.
 #include "SplatTiles.hlsli"
 
 ConstantBuffer<FrameConstants> g_frame : register(b0);
@@ -16,15 +16,12 @@ void main(uint3 thread : SV_DispatchThreadID)
 {
     const uint position = thread.x;
 
-    // The dispatch covers the pair capacity, which is the larger of the two.
-    if (position < g_sort.pairCapacity)
+    // Only the window's tail needs filling: the tile sort stops there, so the
+    // slots beyond it are never read and what they still hold does not matter.
+    if (position >= sortPairTotal() && position < sortPairWindow())
     {
-        const uint total = g_groupSums[g_sort.count / R4D_SORT_GROUP_SIZE];
-        if (position >= total)
-        {
-            g_pairTileA[position] = 0xFFFFFFFFu;
-            g_pairSplatA[position] = 0u;
-        }
+        g_pairTileA[position] = 0xFFFFFFFFu;
+        g_pairSplatA[position] = 0u;
     }
 
     if (position >= g_sort.splatCount)

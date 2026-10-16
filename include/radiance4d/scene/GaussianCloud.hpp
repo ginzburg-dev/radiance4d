@@ -96,8 +96,8 @@ namespace r4d
 
         // Fills both: bounds, padded by each splat's largest scale so they cover
         // the splat rather than just its centre, and the framing sphere.
-        // Everything that needs the true extent — culling, the near and far
-        // planes, the merge with a mesh's bounds — still reads bounds.
+        // Everything that needs the true extent still reads bounds: culling, the
+        // near and far planes, the merge with a mesh's bounds.
         void recomputeBounds();
     };
 

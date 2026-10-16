@@ -100,6 +100,11 @@ namespace r4d::d3d12
         void rasteriseSplats(UINT frameIndex);
         Status createSortPipelines(const std::filesystem::path& shaderDirectory);
         void sortSplats(UINT frameIndex);
+        Status createSortBufferOf(UINT64 entries, const wchar_t* name,
+                                  ComPtr<ID3D12Resource>& out);
+        Status createPairBuffers();
+        Status growPairBuffers(UINT wanted);
+        static UINT pairCapacityFor(UINT64 pairs);
         UINT64 sortBufferBytes() const;
         UINT64 pairBufferBytes() const;
         void renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
@@ -226,11 +231,14 @@ namespace r4d::d3d12
         ComPtr<ID3D12DescriptorHeap> m_splatHeap;
         UINT m_splatDescriptorSize = 0;
 
-        // How many (tile, splat) pairs fit. Fixed at upload, so a frame that
-        // would produce more drops the overflow rather than growing.
+        // How many (tile, splat) pairs fit. Guessed at upload and grown to the
+        // total a view measures, so only a view past the growth ceiling drops.
         std::uint32_t m_pairCapacity = 0;
         std::uint32_t m_pairTileCount = 0;
         bool m_pairOverflowReported = false;
+        // A slot's readback holds nothing until that slot has recorded the copy
+        // once; before then it is whatever the heap happened to contain.
+        std::array<bool, kFramesInFlight> m_pairTotalValid{};
 
         std::uint32_t m_sortTileCount = 0;
         // m_gaussianCount rounded up to a whole number of tiles.

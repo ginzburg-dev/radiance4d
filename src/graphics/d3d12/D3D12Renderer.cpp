@@ -96,9 +96,18 @@ namespace r4d::d3d12
         // Enough tile ranges for any viewport this renderer will be resized to.
         constexpr UINT kMaxTiles = ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
                                    ((4320 + kSplatTileSize - 1) / kSplatTileSize);
-        // How many (tile, splat) pairs are allowed per splat on average. A
-        // frame that needs more drops the overflow, which is reported.
+        // The (tile, splat) pairs a cloud starts with, per splat. Only a guess:
+        // what a view wants is set by how much screen the splats cover, so a
+        // frame that wants more grows the buffers to the total it measured.
         constexpr UINT kPairsPerSplat = 8;
+        // How far that growth may go, in the same unit, before a view is
+        // refused instead. At 1024 tiles per splat the true worst case is four
+        // orders of magnitude larger than any view yet measured.
+        constexpr UINT kMaxPairsPerSplat = 32;
+        // Grown capacity carries this much slack over the total that asked for
+        // it, so a camera drifting into a slightly worse view does not
+        // reallocate every frame.
+        constexpr UINT kPairGrowthPercent = 25;
         constexpr DXGI_FORMAT kSplatColourFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
         // Mirrors SplatProjection in Splat.hlsli. GPU-only, so only its size
@@ -1606,27 +1615,15 @@ namespace r4d::d3d12
         m_sortTileCount = (count + kSortGroupSize - 1) / kSortGroupSize;
         m_sortPaddedCount = m_sortTileCount * kSortGroupSize;
 
-        // The pairs are bounded rather than grown: a frame needing more drops
-        // the overflow, which uploadGaussians reports as a limit.
-        m_pairCapacity =
-            ((count * kPairsPerSplat + kSortGroupSize - 1) / kSortGroupSize) * kSortGroupSize;
+        // A starting guess only. How many pairs a view wants is decided by how
+        // much screen the splats cover, not by how many there are, so the first
+        // frame that wants more than this grows the buffers to what it measured.
+        m_pairCapacity = pairCapacityFor(count * kPairsPerSplat);
         m_pairTileCount = m_pairCapacity / kSortGroupSize;
-
-        // Digit-major, one row of per-tile counts per digit. The tile sort runs
-        // over the pairs, which is the larger of the two.
-        const UINT64 histogramEntries =
-            static_cast<UINT64>(kSortBuckets) * std::max(m_sortTileCount, m_pairTileCount);
 
         const auto createSortBuffer = [&](UINT64 entries, const wchar_t* name,
                                           ComPtr<ID3D12Resource>& out) -> Status {
-            auto desc = bufferDesc(entries * sizeof(std::uint32_t));
-            desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-            R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
-                                                     &desc, D3D12_RESOURCE_STATE_COMMON,
-                                                     nullptr, IID_PPV_ARGS(&out)),
-                   "CreateCommittedResource (splat sort buffer)");
-            out->SetName(name);
-            return Status::Ok();
+            return createSortBufferOf(entries, name, out);
         };
 
         for (UINT i = 0; i < kFramesInFlight; ++i)
@@ -1642,8 +1639,6 @@ namespace r4d::d3d12
                                      sort.keysB));
             R4D_TRY(createSortBuffer(m_sortPaddedCount, L"Radiance4D Splat Sort Values B",
                                      sort.valuesB));
-            R4D_TRY(createSortBuffer(histogramEntries, L"Radiance4D Splat Sort Histogram",
-                                     sort.histogram));
             R4D_TRY(createSortBuffer(kSortBuckets, L"Radiance4D Splat Sort Digit Bases",
                                      sort.digitBase));
 
@@ -1654,14 +1649,6 @@ namespace r4d::d3d12
             // One slot per group, plus one for the grand total.
             R4D_TRY(createSortBuffer(m_sortTileCount + 1, L"Radiance4D Splat Group Sums",
                                      sort.groupSums));
-            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Tiles A",
-                                     sort.pairTileA));
-            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Tiles B",
-                                     sort.pairTileB));
-            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Splats A",
-                                     sort.pairSplatA));
-            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Splats B",
-                                     sort.pairSplatB));
             R4D_TRY(createSortBuffer(kMaxTiles * 2, L"Radiance4D Splat Tile Ranges",
                                      sort.tileRanges));
 
@@ -1687,6 +1674,9 @@ namespace r4d::d3d12
             sort.projections->SetName(L"Radiance4D Splat Projections");
 
         }
+
+        R4D_TRY(createPairBuffers());
+        m_pairTotalValid = {};
 
         auto& frame = m_frames[0];
         R4D_HR(frame.commandAllocator->Reset(), "Reset (gaussian upload allocator)");
@@ -1734,6 +1724,47 @@ namespace r4d::d3d12
         return Status::Ok();
     }
 
+    Status D3D12Renderer::createSortBufferOf(UINT64 entries, const wchar_t* name,
+                                             ComPtr<ID3D12Resource>& out)
+    {
+        const auto defaultHeap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+        auto desc = bufferDesc(entries * sizeof(std::uint32_t));
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
+                                                 D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                                 IID_PPV_ARGS(&out)),
+               "CreateCommittedResource (splat sort buffer)");
+        out->SetName(name);
+        return Status::Ok();
+    }
+
+    // The four pair buffers and the histogram the tile sort shares with the
+    // depth sort: everything whose size follows the pair capacity rather than
+    // the splat count, so growing the capacity recreates exactly this set.
+    Status D3D12Renderer::createPairBuffers()
+    {
+        // Digit-major, one row of per-tile counts per digit. The tile sort runs
+        // over the pairs, which is the larger of the two.
+        const UINT64 histogramEntries =
+            static_cast<UINT64>(kSortBuckets) * std::max(m_sortTileCount, m_pairTileCount);
+
+        for (UINT i = 0; i < kFramesInFlight; ++i)
+        {
+            SortBuffers& sort = m_sortBuffers[i];
+            R4D_TRY(createSortBufferOf(histogramEntries,
+                                       L"Radiance4D Splat Sort Histogram", sort.histogram));
+            R4D_TRY(createSortBufferOf(m_pairCapacity, L"Radiance4D Splat Pair Tiles A",
+                                       sort.pairTileA));
+            R4D_TRY(createSortBufferOf(m_pairCapacity, L"Radiance4D Splat Pair Tiles B",
+                                       sort.pairTileB));
+            R4D_TRY(createSortBufferOf(m_pairCapacity, L"Radiance4D Splat Pair Splats A",
+                                       sort.pairSplatA));
+            R4D_TRY(createSortBufferOf(m_pairCapacity, L"Radiance4D Splat Pair Splats B",
+                                       sort.pairSplatB));
+        }
+        return Status::Ok();
+    }
+
     // Everything the splat path holds whose size is fixed by the splat count.
     UINT64 D3D12Renderer::sortBufferBytes() const
     {
@@ -1751,8 +1782,7 @@ namespace r4d::d3d12
                kFramesInFlight;
     }
 
-    // The four pair buffers and the histogram the tile sort shares with the
-    // depth sort, which between them are most of what the splat path costs.
+    // Everything whose size follows the pair capacity, which is what grows.
     UINT64 D3D12Renderer::pairBufferBytes() const
     {
         if (m_gaussianCount == 0)
@@ -1763,6 +1793,65 @@ namespace r4d::d3d12
             static_cast<UINT64>(4) * m_pairCapacity +
             static_cast<UINT64>(kSortBuckets) * std::max(m_sortTileCount, m_pairTileCount);
         return entries * sizeof(std::uint32_t) * kFramesInFlight;
+    }
+
+    // Rounds a wanted pair count up to a whole number of sort groups, since
+    // every kernel but the binning itself runs a group at a time.
+    UINT D3D12Renderer::pairCapacityFor(UINT64 pairs)
+    {
+        const UINT64 rounded =
+            ((pairs + kSortGroupSize - 1) / kSortGroupSize) * kSortGroupSize;
+        return static_cast<UINT>(rounded);
+    }
+
+    // The binning scan measured a view wanting more pairs than the buffers
+    // hold. Rather than drop the overflow -- which, because the pairs are laid
+    // out in depth order, always falls on the splats nearest the camera -- size
+    // the buffers to what was measured and carry on.
+    Status D3D12Renderer::growPairBuffers(UINT wanted)
+    {
+        const UINT64 ceiling =
+            static_cast<UINT64>(m_gaussianCount) * kMaxPairsPerSplat;
+        const UINT64 target =
+            static_cast<UINT64>(wanted) + wanted / 100 * kPairGrowthPercent;
+        if (target > ceiling)
+        {
+            // Past the ceiling the pairs would cost more than the cloud itself
+            // several times over, so the view is refused instead of grown into.
+            if (!m_pairOverflowReported)
+            {
+                m_pairOverflowReported = true;
+                R4D_WARN("Splats: tile binning wants {} pairs, past the {} this cloud is "
+                         "allowed; the overflow is dropped and this view is missing the "
+                         "splats nearest the camera",
+                         wanted, static_cast<UINT>(ceiling));
+            }
+            return Status::Ok();
+        }
+
+        // The buffers are in use by whatever is still in flight, and they are
+        // bound by address, so nothing may be recreated until the queue drains.
+        // That drain is most of what the one frame this costs is spent on.
+        const Clock clock;
+        waitForGpuIdle();
+
+        const UINT previous = m_pairCapacity;
+        const UINT64 previousBytes = pairBufferBytes();
+        m_pairCapacity = pairCapacityFor(target);
+        m_pairTileCount = m_pairCapacity / kSortGroupSize;
+        const Status status = createPairBuffers();
+        if (!status)
+        {
+            return status;
+        }
+
+        constexpr double kMiB = 1024.0 * 1024.0;
+        R4D_INFO("Splats: a view wanted {} tile pairs against {}; grew the pair buffers "
+                 "to {} ({:.1f} MiB, was {:.1f}) in {:.1f} ms",
+                 wanted, previous, m_pairCapacity,
+                 static_cast<double>(pairBufferBytes()) / kMiB,
+                 static_cast<double>(previousBytes) / kMiB, clock.elapsedMilliseconds());
+        return Status::Ok();
     }
 
     void D3D12Renderer::sortSplats(UINT frameIndex)
@@ -1878,6 +1967,7 @@ namespace r4d::d3d12
             toCopy.AccessBefore = D3D12_BARRIER_ACCESS_COPY_SOURCE;
             toCopy.AccessAfter = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
             m_commandList->Barrier(1, &copyGroup);
+            m_pairTotalValid[frameIndex] = true;
         }
 
         // The same radix sort, pointed at the pairs: two passes cover a tile id
@@ -2334,8 +2424,10 @@ namespace r4d::d3d12
         // Allocator reuse is gated on the fence, not the back-buffer index.
         R4D_TRY(waitForFenceValue(frame.fenceValue));
 
-        // The same wait means last time's pair total has landed.
-        if (m_gaussianCount != 0 && !m_pairOverflowReported)
+        // The same wait means last time's pair total has landed. It is the
+        // exact demand even when the frame it came from overflowed, because the
+        // counts it sums are never clamped to the capacity.
+        if (m_gaussianCount != 0 && m_pairTotalValid[frameIndex])
         {
             const SortBuffers& sort = m_sortBuffers[frameIndex];
             if (sort.pairTotalReadback)
@@ -2351,10 +2443,7 @@ namespace r4d::d3d12
                 }
                 if (total > m_pairCapacity)
                 {
-                    m_pairOverflowReported = true;
-                    R4D_WARN("Splats: tile binning needs {} pairs but holds {}; the "
-                             "overflow is dropped and this view is missing splats",
-                             total, m_pairCapacity);
+                    R4D_TRY(growPairBuffers(total));
                 }
             }
         }

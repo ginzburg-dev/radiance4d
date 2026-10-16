@@ -110,7 +110,18 @@ namespace r4d::vulkan
         // Enough tile ranges for any viewport this renderer will be resized to.
         constexpr std::uint32_t kMaxTiles = ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
                                             ((4320 + kSplatTileSize - 1) / kSplatTileSize);
+        // The (tile, splat) pairs a cloud starts with, per splat. Only a guess:
+        // what a view wants is set by how much screen the splats cover, so a
+        // frame that wants more grows the buffers to the total it measured.
         constexpr std::uint32_t kPairsPerSplat = 8;
+        // How far that growth may go, in the same unit, before a view is
+        // refused instead. At 1024 tiles per splat the true worst case is four
+        // orders of magnitude larger than any view yet measured.
+        constexpr std::uint32_t kMaxPairsPerSplat = 32;
+        // Grown capacity carries this much slack over the total that asked for
+        // it, so a camera drifting into a slightly worse view does not
+        // reallocate every frame.
+        constexpr std::uint32_t kPairGrowthPercent = 25;
         constexpr VkFormat kSplatColourFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
         // Two passes of the radix sort cover a 16-bit tile id.
         constexpr std::uint32_t kTileSortPasses = 2;
@@ -1601,15 +1612,11 @@ namespace r4d::vulkan
         m_sortTileCount = (count + kSortGroupSize - 1) / kSortGroupSize;
         m_sortPaddedCount = m_sortTileCount * kSortGroupSize;
 
-        m_pairCapacity =
-            ((count * kPairsPerSplat + kSortGroupSize - 1) / kSortGroupSize) * kSortGroupSize;
+        // A starting guess only. How many pairs a view wants is decided by how
+        // much screen the splats cover, not by how many there are, so the first
+        // frame that wants more than this grows the buffers to what it measured.
+        m_pairCapacity = pairCapacityFor(static_cast<VkDeviceSize>(count) * kPairsPerSplat);
         m_pairTileCount = m_pairCapacity / kSortGroupSize;
-
-        // Digit-major, one row of per-tile counts per digit. The tile sort runs
-        // over the pairs, which is the larger of the two.
-        const VkDeviceSize histogramEntries =
-            static_cast<VkDeviceSize>(kSortBuckets) *
-            std::max(m_sortTileCount, m_pairTileCount);
 
         const auto createSortBuffer = [&](VkDeviceSize entries, const char* name,
                                           Buffer& out) -> Status {
@@ -1635,8 +1642,11 @@ namespace r4d::vulkan
             R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort keys B", sort.keysB));
             R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort values B",
                                      sort.valuesB));
-            R4D_TRY(createSortBuffer(histogramEntries, "splat sort histogram",
-                                     sort.histogram));
+            // The histogram and the pairs keep the place they had before they
+            // became growable: a Vulkan allocation's position in this sequence
+            // decides where it lands, and moving them to the end costs 0.5 ms
+            // of tile sort.
+            R4D_TRY(createPairBuffers(i));
             R4D_TRY(createSortBuffer(kSortBuckets, "splat sort digit bases",
                                      sort.digitBase));
 
@@ -1658,19 +1668,11 @@ namespace r4d::vulkan
                 }
                 sort.groupSums = sums.value();
             }
-            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair tiles A",
-                                     sort.pairTileA));
-            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair tiles B",
-                                     sort.pairTileB));
-            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair splats A",
-                                     sort.pairSplatA));
-            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair splats B",
-                                     sort.pairSplatB));
             R4D_TRY(createSortBuffer(kMaxTiles * 2, "splat tile ranges",
                                      sort.tileRanges));
 
-            // The pair total, copied back so a view that wants more pairs than
-            // the buffers hold says so instead of dropping them in silence.
+            // The pair total, copied back so a view that wants more than the
+            // buffers hold grows them instead of dropping the overflow.
             {
                 auto readback = createBuffer(sizeof(std::uint32_t),
                                              VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1714,13 +1716,35 @@ namespace r4d::vulkan
         }
         m_sortConstants = sortConstants.value();
 
+        m_gaussianCount = count;
+        writeSortConstants();
+
+        m_pairTotalValid = {};
+        R4D_TRY(createSplatDescriptors());
+        R4D_TRY(createSortDescriptors());
+
+        constexpr double kMiB = 1024.0 * 1024.0;
+        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB), sorted on the GPU in {} "
+                 "tiles ({:.1f} MiB of sort buffers, {:.1f} MiB of pair buffers for "
+                 "{} pairs)",
+                 count, static_cast<double>(splatBytes) / kMiB, m_sortTileCount,
+                 static_cast<double>(sortBufferBytes()) / kMiB,
+                 static_cast<double>(pairBufferBytes()) / kMiB, m_pairCapacity);
+        return Status::Ok();
+    }
+
+    // Every pass's constants, picked out at dispatch by dynamic offset. The
+    // schedule only depends on the two counts, so it is rewritten whole
+    // whenever the pair capacity moves.
+    void VulkanRenderer::writeSortConstants()
+    {
         for (std::uint32_t section = 0; section < kSortConstantSections; ++section)
         {
             const bool tilePass = section >= kSortPasses;
             const std::uint32_t pass = tilePass ? section - kSortPasses : section;
 
             SortConstants constants{};
-            constants.splatCount = count;
+            constants.splatCount = m_gaussianCount;
             constants.pairCapacity = m_pairCapacity;
             // The tile sort runs the same kernels over the pair buffers, so its
             // sections differ only in how many elements there are.
@@ -1737,20 +1761,39 @@ namespace r4d::vulkan
                             section * m_sortConstantStride,
                         &constants, sizeof(constants));
         }
+    }
 
-        m_gaussianCount = count;
-        m_pairTotalValid = {};
+    // The four pair buffers and the histogram the tile sort shares with the
+    // depth sort: everything whose size follows the pair capacity rather than
+    // the splat count, so growing the capacity recreates exactly this set.
+    Status VulkanRenderer::createPairBuffers(std::uint32_t slot)
+    {
+        // Digit-major, one row of per-tile counts per digit. The tile sort runs
+        // over the pairs, which is the larger of the two.
+        const VkDeviceSize histogramEntries =
+            static_cast<VkDeviceSize>(kSortBuckets) *
+            std::max(m_sortTileCount, m_pairTileCount);
 
-        R4D_TRY(createSplatDescriptors());
-        R4D_TRY(createSortDescriptors());
+        const auto create = [&](VkDeviceSize entries, const char* name,
+                                Buffer& out) -> Status {
+            destroyBuffer(out);
+            auto buffer = createBuffer(entries * sizeof(std::uint32_t),
+                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, name);
+            if (!buffer)
+            {
+                return buffer.error();
+            }
+            out = buffer.value();
+            return Status::Ok();
+        };
 
-        constexpr double kMiB = 1024.0 * 1024.0;
-        R4D_INFO("Gaussians: {} splats uploaded ({:.1f} MiB), sorted on the GPU in {} "
-                 "tiles ({:.1f} MiB of sort buffers, {:.1f} MiB of pair buffers for "
-                 "{} pairs)",
-                 count, static_cast<double>(splatBytes) / kMiB, m_sortTileCount,
-                 static_cast<double>(sortBufferBytes()) / kMiB,
-                 static_cast<double>(pairBufferBytes()) / kMiB, m_pairCapacity);
+        SortBuffers& sort = m_sortBuffers[slot];
+        R4D_TRY(create(histogramEntries, "splat sort histogram", sort.histogram));
+        R4D_TRY(create(m_pairCapacity, "splat pair tiles A", sort.pairTileA));
+        R4D_TRY(create(m_pairCapacity, "splat pair tiles B", sort.pairTileB));
+        R4D_TRY(create(m_pairCapacity, "splat pair splats A", sort.pairSplatA));
+        R4D_TRY(create(m_pairCapacity, "splat pair splats B", sort.pairSplatB));
         return Status::Ok();
     }
 
@@ -1771,8 +1814,7 @@ namespace r4d::vulkan
                kFramesInFlight;
     }
 
-    // The four pair buffers and the histogram the tile sort shares with the
-    // depth sort, which between them are most of what the splat path costs.
+    // Everything whose size follows the pair capacity, which is what grows.
     VkDeviceSize VulkanRenderer::pairBufferBytes() const
     {
         if (m_gaussianCount == 0)
@@ -1783,6 +1825,78 @@ namespace r4d::vulkan
                                      static_cast<VkDeviceSize>(kSortBuckets) *
                                          std::max(m_sortTileCount, m_pairTileCount);
         return entries * sizeof(std::uint32_t) * kFramesInFlight;
+    }
+
+    // Rounds a wanted pair count up to a whole number of sort groups, since
+    // every kernel but the binning itself runs a group at a time.
+    std::uint32_t VulkanRenderer::pairCapacityFor(VkDeviceSize pairs)
+    {
+        const VkDeviceSize rounded =
+            ((pairs + kSortGroupSize - 1) / kSortGroupSize) * kSortGroupSize;
+        return static_cast<std::uint32_t>(rounded);
+    }
+
+    // The binning scan measured a view wanting more pairs than the buffers
+    // hold. Rather than drop the overflow -- which, because the pairs are laid
+    // out in depth order, always falls on the splats nearest the camera -- size
+    // the buffers to what was measured and carry on.
+    Status VulkanRenderer::growPairBuffers(std::uint32_t wanted)
+    {
+        const VkDeviceSize ceiling =
+            static_cast<VkDeviceSize>(m_gaussianCount) * kMaxPairsPerSplat;
+        const VkDeviceSize target =
+            static_cast<VkDeviceSize>(wanted) + wanted / 100 * kPairGrowthPercent;
+        if (target > ceiling)
+        {
+            // Past the ceiling the pairs would cost more than the cloud itself
+            // several times over, so the view is refused instead of grown into.
+            if (!m_pairOverflowReported)
+            {
+                m_pairOverflowReported = true;
+                R4D_WARN("Splats: tile binning wants {} pairs, past the {} this cloud is "
+                         "allowed; the overflow is dropped and this view is missing the "
+                         "splats nearest the camera",
+                         wanted, static_cast<std::uint32_t>(ceiling));
+            }
+            return Status::Ok();
+        }
+
+        // The buffers are in use by whatever is still in flight, and the
+        // descriptor sets name them, so nothing may be recreated or rewritten
+        // until the queue drains. That drain is most of what the one frame this
+        // costs is spent on.
+        const Clock clock;
+        waitForGpuIdle();
+
+        const std::uint32_t previous = m_pairCapacity;
+        const VkDeviceSize previousBytes = pairBufferBytes();
+        m_pairCapacity = pairCapacityFor(target);
+        m_pairTileCount = m_pairCapacity / kSortGroupSize;
+        for (std::uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+        {
+            R4D_TRY(createPairBuffers(slot));
+        }
+        writeSortConstants();
+
+        // The sets hold the old buffers' handles, so they are reallocated from
+        // a fresh pool and the image bindings written back into them.
+        if (m_sortDescriptorPool != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorPool(m_context.device, m_sortDescriptorPool, nullptr);
+            m_sortDescriptorPool = VK_NULL_HANDLE;
+            m_sortSets = {};
+            m_tileSortSets = {};
+        }
+        R4D_TRY(createSortDescriptors());
+        updateSplatImageDescriptors();
+
+        constexpr double kMiB = 1024.0 * 1024.0;
+        R4D_INFO("Splats: a view wanted {} tile pairs against {}; grew the pair buffers "
+                 "to {} ({:.1f} MiB, was {:.1f}) in {:.1f} ms",
+                 wanted, previous, m_pairCapacity,
+                 static_cast<double>(pairBufferBytes()) / kMiB,
+                 static_cast<double>(previousBytes) / kMiB, clock.elapsedMilliseconds());
+        return Status::Ok();
     }
 
     Status VulkanRenderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
@@ -2056,10 +2170,10 @@ namespace r4d::vulkan
         // The binning scan left the pair total one past the per-group sums, and
         // nothing after it writes them again, so the copy out waits until the
         // compute work is done. Putting it between the binning and the tile
-        // sort instead costs 0.5 ms of tile sort: the round trip through the
-        // transfer stage drains a queue that would otherwise have run straight
-        // on. The total is the exact demand even when the frame overflowed,
-        // because the counts it sums are never clamped to the capacity.
+        // sort instead costs 0.5 ms: the round trip through the transfer stage
+        // drains a queue that would otherwise have run straight on. It is the
+        // exact demand even when this frame overflowed, because the counts it
+        // sums are never clamped to the capacity.
         memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
@@ -2540,9 +2654,10 @@ namespace r4d::vulkan
         R4D_VK(vkWaitForFences(m_context.device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX),
                "vkWaitForFences");
 
-        // The same wait means last time's pair total has landed.
+        // The same wait means last time's pair total has landed. It is the
+        // exact demand even when the frame it came from overflowed, because the
+        // counts it sums are never clamped to the capacity.
         if (m_gaussianCount != 0 && m_pairTotalValid[frameIndex] &&
-            !m_pairOverflowReported &&
             m_sortBuffers[frameIndex].pairTotalReadback.mapped)
         {
             std::uint32_t total = 0;
@@ -2550,10 +2665,7 @@ namespace r4d::vulkan
                         sizeof(total));
             if (total > m_pairCapacity)
             {
-                m_pairOverflowReported = true;
-                R4D_WARN("Splats: tile binning needs {} pairs but holds {}; the "
-                         "overflow is dropped and this view is missing splats",
-                         total, m_pairCapacity);
+                R4D_TRY(growPairBuffers(total));
             }
         }
 

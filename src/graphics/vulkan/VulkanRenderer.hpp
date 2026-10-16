@@ -106,6 +106,10 @@ namespace r4d::vulkan
         Status createSplatDescriptors();
         Status createSortPipelines(const std::filesystem::path& shaderDirectory);
         Status createSortDescriptors();
+        Status createPairBuffers(std::uint32_t slot);
+        Status growPairBuffers(std::uint32_t wanted);
+        void writeSortConstants();
+        static std::uint32_t pairCapacityFor(VkDeviceSize pairs);
         VkDeviceSize sortBufferBytes() const;
         VkDeviceSize pairBufferBytes() const;
         void destroySplatBuffers();
@@ -274,8 +278,7 @@ namespace r4d::vulkan
             Buffer pairSplatB;
             Buffer tileRanges;
             // The pair total the binning scan produced, copied back so a view
-            // wanting more than the buffers hold is reported rather than
-            // silently missing its nearest splats.
+            // wanting more than the buffers hold grows them.
             Buffer pairTotalReadback;
         };
         std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
@@ -286,7 +289,7 @@ namespace r4d::vulkan
         VkDescriptorPool m_sortDescriptorPool = VK_NULL_HANDLE;
         std::array<VkDescriptorSet, kFramesInFlight> m_sortSets{};
         // One section per pass, picked with a dynamic offset. Nothing in it
-        // changes with the camera, so it is written once at upload.
+        // changes with the camera, so it is rewritten only when a count moves.
         Buffer m_sortConstants;
         VkDeviceSize m_sortConstantStride = 0;
         // The tile sort reuses the radix kernels with the pair buffers bound
@@ -296,6 +299,8 @@ namespace r4d::vulkan
         // The rasteriser's own target, composited over the mesh image.
         Image m_splatColour;
 
+        // How many (tile, splat) pairs fit. Guessed at upload and grown to the
+        // total a view measures, so only a view past the growth ceiling drops.
         std::uint32_t m_pairCapacity = 0;
         std::uint32_t m_pairTileCount = 0;
         bool m_pairOverflowReported = false;

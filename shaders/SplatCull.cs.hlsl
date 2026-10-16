@@ -90,6 +90,15 @@ void main(uint3 thread : SV_DispatchThreadID)
 
     const Gaussian g = g_gaussians[index];
 
+    // The rasteriser discards any sample under 1/255, and a splat's alpha is
+    // at most its own opacity, so one stored below that floor cannot colour a
+    // pixel wherever it lands. Testing it here rather than after the walk is
+    // what stops it being projected, sorted, binned and read back out again.
+    if (g.opacity < 1.0f / 255.0f)
+    {
+        return;
+    }
+
     const float4 viewPosition = mul(g_frame.view, float4(g.position, 1.0f));
     if (viewPosition.z < g_frame.splatNearPlane)
     {

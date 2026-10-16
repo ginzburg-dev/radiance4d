@@ -38,7 +38,8 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 | Spherical-harmonic colour (degree 3) | working (both backends) |
 | Splat GPU depth sorting | working (compute radix sort, both backends) |
 | Splat visibility culling, tiled binning | planned (M4) |
-| COLMAP / gsplat reconstruction | planned (M5) |
+| COLMAP sparse model to renderable splats | working (Python, no dependencies) |
+| COLMAP pose estimation, gsplat training | planned (M5), needs tools not installed here |
 | Hybrid mesh and Gaussian rendering | working (shared depth buffer) |
 | Temporal reprojection and denoising | planned (M7) |
 | Dynamic 4D Gaussians | planned (M8) |
@@ -227,6 +228,31 @@ That is what the parity figure turns on. Measured on the washed-out image, D3D12
 `truck` gives max channel delta 1, RMSE 0.0079, 74 of 921,600 pixels, which is two featureless
 fields agreeing and says nothing. Measured with the clamp, the same comparison is max channel
 delta 2, RMSE 0.0380, 3,360 pixels, and that is the honest parity statement for this scene.
+
+## Reconstruction tooling
+
+`tools/reconstruct` turns a photogrammetry reconstruction into something the engine renders, in
+Python with no dependencies:
+
+```
+python -m r4drecon inspect <sparse-model-folder>
+python -m r4drecon export  <sparse-model-folder> out.ply
+```
+
+`export` writes COLMAP's 3D points as a 3DGS `.ply` that `--splat-ply` loads. Each point becomes one
+splat with its colour, a fixed low opacity, an identity rotation and an isotropic scale taken from
+the distance to its three nearest neighbours — the initialisation the reference implementation
+optimises from, so a sparse reconstruction is viewable before any training has run. The neighbour
+search goes through a uniform grid rather than comparing every pair, which keeps it linear: 28,000
+points take about 8 seconds.
+
+Only COLMAP's binary model is read; a text one converts with `colmap model_converter
+--output_type BIN`. Nothing in the tool changes coordinate frames, so a file it writes and a file
+downloaded from a published scene are treated identically by the loader's mirror.
+
+Pose estimation and training are not implemented. `python -m r4drecon train` reports what they would
+need — COLMAP, PyTorch with CUDA, and gsplat — none of which is installed here, rather than failing
+obscurely. `tools/reconstruct/README.md` has the detail.
 
 ## Measurements
 

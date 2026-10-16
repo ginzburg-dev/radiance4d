@@ -231,7 +231,25 @@ them, would.
 ## M5 — Reconstruction pipeline
 
 COLMAP for pose estimation, PyTorch and gsplat for optimisation, a Python CLI for dataset processing
-and training, export into the runtime. Requires COLMAP and a dedicated Python environment.
+and training, export into the runtime.
+
+Done: the half that needs nothing installed. `tools/reconstruct` is a dependency-free Python package
+that reads COLMAP's binary sparse model — cameras, images and 3D points — and writes the points as a
+3DGS `.ply` the engine loads. Each point becomes a splat with its colour, a fixed opacity, an
+identity rotation and an isotropic scale from its three nearest neighbours, which is what the
+reference implementation starts optimisation from; a sparse reconstruction is therefore viewable
+before any training. The neighbour search uses a uniform grid, so it is linear in the point count
+rather than quadratic: 28,000 points take about 8 seconds.
+
+The readers are tested against bytes the tests write in COLMAP's own layout, including the
+variable-length image names and point tracks that a mis-advancing reader would desynchronise on, and
+the writer is tested by round-tripping the activations the format stores. They run in the main
+suite as `Reconstruct_test`. End to end, a synthesised 28,000-point model exports and renders with
+zero validation errors.
+
+Remaining: pose estimation and optimisation, which need COLMAP, PyTorch with CUDA and gsplat. None
+is installed on this machine, and `r4drecon train` says so and exits rather than failing obscurely.
+Only the binary COLMAP model is read; a text model is converted with `colmap model_converter`.
 
 ## M6 — Hybrid rendering
 

@@ -3,36 +3,29 @@
 [![Windows build and test](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml/badge.svg?branch=main)](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A real-time renderer that draws triangle meshes and 3D Gaussian splats in the same frame, on
-Direct3D 12 and Vulkan, from one set of HLSL sources.
+**A real-time viewer for scanned places and 3D models together.**
 
-Published Gaussian Splatting scenes render at a million splats in under ten milliseconds at 1080p,
-through a compute pipeline that culls, depth-sorts, bins into tiles and composites front to back.
+Load a photogrammetry scan and a 3D model. It draws both in the same frame, correctly in front of
+and behind each other. Direct3D 12 and Vulkan. A million splats at 1080p in under 10 ms.
 
 ![INRIA train, 1.03M splats, with the per-pass overlay](docs/images/overlay.png)
 
 ---
 
-## What it is for
+## Why
 
-Photogrammetry turns a real place into something that looks right from any angle, but what it
-produces is a cloud of Gaussians, not geometry. Everything authored — characters, props, vehicles,
-set pieces — is triangles. Tools handle one or the other: splat viewers cannot light or intersect a
-mesh, and engines treat splats as an import rather than a first-class primitive.
+Scans and 3D models are different things. Splat viewers cannot draw models. Game engines treat
+scans as an import. This does both at once.
 
-Radiance4D draws both in one frame, sharing one depth buffer, so a captured location becomes a set
-you can put things into:
+What that is good for:
 
-- **Virtual production and previs** — walk a scanned location in real time and place virtual
-  geometry in it, with the capture occluding and being occluded correctly
-- **VFX layout** — a photographed environment as a live backdrop for a CG element, instead of a
-  flat plate
-- **Digital twins and inspection** — a captured site with CAD or annotations composited on top
-- **Research and tooling** — a complete, readable Gaussian Splatting pipeline to build on
+- **Virtual production and previs** — put CG into a scanned location and walk it live
+- **VFX layout** — a scanned environment behind a CG element instead of a flat plate
+- **Digital twins** — a scanned site with CAD or markup on top
+- **A base to build on** — the whole splatting pipeline, readable, in one repo
 
-The reference Gaussian Splatting implementation is CUDA, which ties it to one vendor. This one is
-HLSL compiled to both DXIL and SPIR-V, so the same pipeline runs under Direct3D 12 and Vulkan — and
-the test suite runs it on WARP, Microsoft's software rasteriser, with no GPU present at all.
+The reference splatting code is CUDA, so it needs an NVIDIA card. This one is plain HLSL. It runs
+on any Direct3D 12 or Vulkan GPU, and the tests run it with no GPU at all.
 
 ---
 

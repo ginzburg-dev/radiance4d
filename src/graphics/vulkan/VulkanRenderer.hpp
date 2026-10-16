@@ -108,6 +108,9 @@ namespace r4d::vulkan
         Status createSortDescriptors();
         void destroySplatBuffers();
         void sortSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex);
+        void rasteriseSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex);
+        Status createSplatTargets(UVec2 size);
+        void updateSplatImageDescriptors();
         void renderSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex,
                           std::uint32_t& drawCalls, std::uint32_t& triangles);
         Status createDescriptorSets(const Model& model);
@@ -193,6 +196,14 @@ namespace r4d::vulkan
             ScanRows,
             ScanTotals,
             Scatter,
+            BinCount,
+            ScanGroups,
+            ScanGroupSums,
+            ScanAdd,
+            Bin,
+            TileRangesReset,
+            TileRanges,
+            Raster,
             Count
         };
 
@@ -207,8 +218,19 @@ namespace r4d::vulkan
             Buffer histogram;
             Buffer digitBase;
             // One projection per splat, written by the cull pass and read
-            // by the vertex shader.
+            // by the tile rasteriser.
             Buffer projections;
+            // Tile binning: per-splat tile counts, their prefix sum and its
+            // scratch, the (tile, splat) pairs the tile sort ping-pongs, and
+            // one [first, last) range per tile.
+            Buffer tileCounts;
+            Buffer tileOffsets;
+            Buffer groupSums;
+            Buffer pairTileA;
+            Buffer pairTileB;
+            Buffer pairSplatA;
+            Buffer pairSplatB;
+            Buffer tileRanges;
         };
         std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
         VkDescriptorSetLayout m_sortSetLayout = VK_NULL_HANDLE;
@@ -221,6 +243,16 @@ namespace r4d::vulkan
         // changes with the camera, so it is written once at upload.
         Buffer m_sortConstants;
         VkDeviceSize m_sortConstantStride = 0;
+        // The tile sort reuses the radix kernels with the pair buffers bound
+        // where the depth sort's keys and values usually sit.
+        std::array<VkDescriptorSet, kFramesInFlight> m_tileSortSets{};
+
+        // The rasteriser's own target, composited over the mesh image.
+        Image m_splatColour;
+
+        std::uint32_t m_pairCapacity = 0;
+        std::uint32_t m_pairTileCount = 0;
+
         std::uint32_t m_sortTileCount = 0;
         // m_gaussianCount rounded up to a whole number of tiles.
         std::uint32_t m_sortPaddedCount = 0;

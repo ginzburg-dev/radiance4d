@@ -75,6 +75,9 @@ namespace r4d::vulkan
         // The sort's b1 and u0..u5, moved by the same shifts.
         constexpr std::uint32_t kSortConstantsBinding = 1;
         constexpr std::uint32_t kSortBufferBinding = R4D_VK_U_SHIFT;
+        // t3 and u15 in SplatRaster.cs.hlsl, through the same register shifts.
+        constexpr std::uint32_t kSplatDepthBinding = R4D_VK_T_SHIFT + 3;
+        constexpr std::uint32_t kSplatTargetBinding = R4D_VK_U_SHIFT + 15;
 
         // All four must match SplatSort.hlsli, and the D3D12 backend.
         constexpr std::uint32_t kSortGroupSize = 256;
@@ -92,13 +95,22 @@ namespace r4d::vulkan
             std::uint32_t tileCount;
             std::uint32_t shift;
             std::uint32_t sourceIsB;
-            std::uint32_t padding[3];
+            std::uint32_t pairCapacity;
+            std::uint32_t padding[2];
         };
         static_assert(sizeof(SortConstants) == 32);
 
         // Both halves of the key and value ping-pong, the per-tile histograms
         // and the digit bases.
-        constexpr std::uint32_t kSortBufferCount = 7;
+        constexpr std::uint32_t kSortBufferCount = 15;
+
+        // Must match R4D_TILE_SIZE in SplatTiles.hlsli.
+        constexpr std::uint32_t kSplatTileSize = 16;
+        constexpr std::uint32_t kPairsPerSplat = 8;
+        constexpr VkFormat kSplatColourFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+        // Two passes of the radix sort cover a 16-bit tile id.
+        constexpr std::uint32_t kTileSortPasses = 2;
+        constexpr std::uint32_t kSortConstantSections = kSortPasses + kTileSortPasses;
 
         // Mirrors SplatProjection in Splat.hlsli. GPU-only, so only its size
         // matters here, but the fields are named so the two can be compared.
@@ -213,6 +225,7 @@ namespace r4d::vulkan
             R4D_TRY(createSwapchain(m_size));
         }
         R4D_TRY(createDepthImage(m_size));
+        R4D_TRY(createSplatTargets(m_size));
         R4D_TRY(createShadowMap());
         R4D_TRY(createFrameResources());
         R4D_TRY(createDescriptorLayout());
@@ -405,12 +418,29 @@ namespace r4d::vulkan
         }
     }
 
+    Status VulkanRenderer::createSplatTargets(UVec2 size)
+    {
+        destroyImage(m_splatColour);
+        auto image = createImage(size.x, size.y, kSplatColourFormat,
+                                 VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1,
+                                 VK_IMAGE_ASPECT_COLOR_BIT);
+        if (!image)
+        {
+            return image.error();
+        }
+        m_splatColour = image.value();
+        return Status::Ok();
+    }
+
     Status VulkanRenderer::createDepthImage(UVec2 size)
     {
         destroyImage(m_depth);
+        // Sampled as well: the tile rasteriser reads it to reject splats
+        // behind the mesh.
         auto image = createImage(size.x, size.y, kDepthFormat,
-                                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 1,
-                                 VK_IMAGE_ASPECT_DEPTH_BIT);
+                                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                     VK_IMAGE_USAGE_SAMPLED_BIT,
+                                 1, VK_IMAGE_ASPECT_DEPTH_BIT);
         if (!image)
         {
             return image.error();
@@ -1054,14 +1084,11 @@ namespace r4d::vulkan
 
     Status VulkanRenderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
     {
+        // One texture, fetched by its coordinate, so there is no sampler and
+        // nothing else to bind: the tile rasteriser already did the work.
         const VkDescriptorSetLayoutBinding bindings[] = {
-            // Dynamic, so one set per frame slot still indexes the shared buffer.
-            {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT,
-             nullptr},
-            {kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-             VK_SHADER_STAGE_VERTEX_BIT, nullptr},
-            {kGaussianOrderBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-             VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+            {kGaussianBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1,
+             VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
         };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{
@@ -1080,12 +1107,12 @@ namespace r4d::vulkan
                                       &m_splatPipelineLayout),
                "vkCreatePipelineLayout (splat)");
 
-        auto vertexModule = loadShaderModule(shaderDirectory, "Splat.vs.spv");
+        auto vertexModule = loadShaderModule(shaderDirectory, "SplatComposite.vs.spv");
         if (!vertexModule)
         {
             return vertexModule.error();
         }
-        auto fragmentModule = loadShaderModule(shaderDirectory, "Splat.ps.spv");
+        auto fragmentModule = loadShaderModule(shaderDirectory, "SplatComposite.ps.spv");
         if (!fragmentModule)
         {
             vkDestroyShaderModule(m_context.device, vertexModule.value(), nullptr);
@@ -1108,7 +1135,7 @@ namespace r4d::vulkan
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{
             VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
         VkPipelineViewportStateCreateInfo viewportState{
             VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
@@ -1127,11 +1154,11 @@ namespace r4d::vulkan
             VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-        // Tested against the mesh depth, never written: the splats order
+        // The depth test happened per splat in the rasteriser.
         // themselves by the draw order instead.
         VkPipelineDepthStencilStateCreateInfo depthStencil{
             VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthTestEnable = VK_FALSE;
         depthStencil.depthWriteEnable = VK_FALSE;
         depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
@@ -1453,6 +1480,14 @@ namespace r4d::vulkan
             destroyBuffer(sort.valuesB);
             destroyBuffer(sort.histogram);
             destroyBuffer(sort.digitBase);
+            destroyBuffer(sort.tileCounts);
+            destroyBuffer(sort.tileOffsets);
+            destroyBuffer(sort.groupSums);
+            destroyBuffer(sort.pairTileA);
+            destroyBuffer(sort.pairTileB);
+            destroyBuffer(sort.pairSplatA);
+            destroyBuffer(sort.pairSplatB);
+            destroyBuffer(sort.tileRanges);
             destroyBuffer(sort.projections);
         }
     }
@@ -1532,9 +1567,20 @@ namespace r4d::vulkan
         m_sortTileCount = (count + kSortGroupSize - 1) / kSortGroupSize;
         m_sortPaddedCount = m_sortTileCount * kSortGroupSize;
 
-        // Digit-major, one row of per-tile counts per digit.
+        m_pairCapacity =
+            ((count * kPairsPerSplat + kSortGroupSize - 1) / kSortGroupSize) * kSortGroupSize;
+        m_pairTileCount = m_pairCapacity / kSortGroupSize;
+
+        // Enough tile ranges for any viewport this renderer will be resized to.
+        constexpr std::uint32_t kMaxTiles =
+            ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
+            ((4320 + kSplatTileSize - 1) / kSplatTileSize);
+
+        // Digit-major, one row of per-tile counts per digit. The tile sort runs
+        // over the pairs, which is the larger of the two.
         const VkDeviceSize histogramEntries =
-            static_cast<VkDeviceSize>(kSortBuckets) * m_sortTileCount;
+            static_cast<VkDeviceSize>(kSortBuckets) *
+            std::max(m_sortTileCount, m_pairTileCount);
 
         const auto createSortBuffer = [&](VkDeviceSize entries, const char* name,
                                           Buffer& out) -> Status {
@@ -1565,6 +1611,23 @@ namespace r4d::vulkan
             R4D_TRY(createSortBuffer(kSortBuckets, "splat sort digit bases",
                                      sort.digitBase));
 
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat tile counts",
+                                     sort.tileCounts));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat tile offsets",
+                                     sort.tileOffsets));
+            R4D_TRY(createSortBuffer(m_sortTileCount + 1, "splat group sums",
+                                     sort.groupSums));
+            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair tiles A",
+                                     sort.pairTileA));
+            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair tiles B",
+                                     sort.pairTileB));
+            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair splats A",
+                                     sort.pairSplatA));
+            R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair splats B",
+                                     sort.pairSplatB));
+            R4D_TRY(createSortBuffer(kMaxTiles * 2, "splat tile ranges",
+                                     sort.tileRanges));
+
             // One projection per real splat; the sort's padding never reaches
             // the draw, so it needs none.
             auto projections = createBuffer(
@@ -1584,7 +1647,7 @@ namespace r4d::vulkan
         m_sortConstantStride =
             alignUp(sizeof(SortConstants),
                     m_context.properties.limits.minUniformBufferOffsetAlignment);
-        auto sortConstants = createBuffer(m_sortConstantStride * kSortPasses,
+        auto sortConstants = createBuffer(m_sortConstantStride * kSortConstantSections,
                                           VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1595,17 +1658,23 @@ namespace r4d::vulkan
         }
         m_sortConstants = sortConstants.value();
 
-        for (std::uint32_t pass = 0; pass < kSortPasses; ++pass)
+        for (std::uint32_t section = 0; section < kSortConstantSections; ++section)
         {
+            const bool tilePass = section >= kSortPasses;
+            const std::uint32_t pass = tilePass ? section - kSortPasses : section;
+
             SortConstants constants{};
-            constants.count = m_sortPaddedCount;
             constants.splatCount = count;
-            constants.tileCount = m_sortTileCount;
+            constants.pairCapacity = m_pairCapacity;
+            // The tile sort runs the same kernels over the pair buffers, so its
+            // sections differ only in how many elements there are.
+            constants.count = tilePass ? m_pairCapacity : m_sortPaddedCount;
+            constants.tileCount = tilePass ? m_pairTileCount : m_sortTileCount;
             constants.shift = pass * kSortDigitBits;
             // Pass 0 reads A, and an even pass count brings the result home.
             constants.sourceIsB = pass & 1u;
             std::memcpy(static_cast<std::byte*>(m_sortConstants.mapped) +
-                            pass * m_sortConstantStride,
+                            section * m_sortConstantStride,
                         &constants, sizeof(constants));
         }
 
@@ -1642,6 +1711,12 @@ namespace r4d::vulkan
             bindings.push_back({kSortBufferBinding + i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
         }
+        // Only the rasteriser uses these, but one layout across every splat
+        // kernel keeps the binding code in one place.
+        bindings.push_back({kSplatDepthBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1,
+                            VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
+        bindings.push_back({kSplatTargetBinding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1,
+                            VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{
             VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
@@ -1661,9 +1736,13 @@ namespace r4d::vulkan
 
         // Indexed by SortStage, so the order of these must match the enum.
         static constexpr std::string_view kStageShaders[] = {
-            "SplatCull.cs.spv", "SplatSortHistogram.cs.spv",
-            "SplatSortScanRows.cs.spv", "SplatSortScanTotals.cs.spv",
-            "SplatSortScatter.cs.spv"};
+            "SplatCull.cs.spv",          "SplatSortHistogram.cs.spv",
+            "SplatSortScanRows.cs.spv",  "SplatSortScanTotals.cs.spv",
+            "SplatSortScatter.cs.spv",   "SplatBinCount.cs.spv",
+            "SplatScanGroups.cs.spv",    "SplatScanGroupSums.cs.spv",
+            "SplatScanAdd.cs.spv",       "SplatBin.cs.spv",
+            "SplatTileRangesReset.cs.spv", "SplatTileRanges.cs.spv",
+            "SplatRaster.cs.spv"};
         static_assert(std::size(kStageShaders) ==
                       static_cast<std::size_t>(SortStage::Count));
 
@@ -1696,12 +1775,15 @@ namespace r4d::vulkan
     Status VulkanRenderer::createSortDescriptors()
     {
         const VkDescriptorPoolSize sizes[] = {
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, kFramesInFlight * 2},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight * (kSortBufferCount + 1)},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, kFramesInFlight * 4},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+             kFramesInFlight * 2 * (kSortBufferCount + 1)},
+            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kFramesInFlight * 2},
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kFramesInFlight * 2},
         };
 
         VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-        poolInfo.maxSets = kFramesInFlight;
+        poolInfo.maxSets = kFramesInFlight * 2;
         poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
         poolInfo.pPoolSizes = sizes;
         R4D_VK(vkCreateDescriptorPool(m_context.device, &poolInfo, nullptr,
@@ -1717,15 +1799,28 @@ namespace r4d::vulkan
         allocInfo.pSetLayouts = layouts.data();
         R4D_VK(vkAllocateDescriptorSets(m_context.device, &allocInfo, m_sortSets.data()),
                "vkAllocateDescriptorSets (splat sort)");
+        R4D_VK(vkAllocateDescriptorSets(m_context.device, &allocInfo,
+                                        m_tileSortSets.data()),
+               "vkAllocateDescriptorSets (splat tile sort)");
 
+        for (std::uint32_t pass = 0; pass < 2; ++pass)
         for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
         {
             const SortBuffers& sort = m_sortBuffers[i];
-            // Must match the u0..u6 order in SplatSort.hlsli.
+            const VkDescriptorSet set = (pass == 0) ? m_sortSets[i] : m_tileSortSets[i];
+
+            // Must match the u0..u14 order in SplatSort.hlsli and SplatTiles.hlsli.
+            // The tile sort is the same kernels over the pairs, so its set puts
+            // the pair buffers where the depth keys and values usually sit.
             const Buffer* const sortBuffers[kSortBufferCount] = {
-                &sort.keysA,    &sort.keysB,     &m_gaussianOrder[i],
-                &sort.valuesB,  &sort.histogram, &sort.digitBase,
-                &sort.projections};
+                (pass == 0) ? &sort.keysA : &sort.pairTileA,
+                (pass == 0) ? &sort.keysB : &sort.pairTileB,
+                (pass == 0) ? &m_gaussianOrder[i] : &sort.pairSplatA,
+                (pass == 0) ? &sort.valuesB : &sort.pairSplatB,
+                &sort.histogram,   &sort.digitBase,   &sort.projections,
+                &sort.tileCounts,  &sort.tileOffsets, &sort.groupSums,
+                &sort.pairTileA,   &sort.pairTileB,
+                &sort.pairSplatA,  &sort.pairSplatB,  &sort.tileRanges};
 
             VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0,
                                              sizeof(FrameConstants)};
@@ -1738,7 +1833,7 @@ namespace r4d::vulkan
             const auto write = [&](std::uint32_t binding, VkDescriptorType type,
                                    const VkDescriptorBufferInfo* buffer) {
                 VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-                entry.dstSet = m_sortSets[i];
+                entry.dstSet = set;
                 entry.dstBinding = binding;
                 entry.descriptorCount = 1;
                 entry.descriptorType = type;
@@ -1756,6 +1851,25 @@ namespace r4d::vulkan
                 write(kSortBufferBinding + b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                       &bufferInfos[b]);
             }
+
+            // The rasteriser's two images. They outlive an upload but are
+            // recreated on resize, which rewrites these.
+            VkDescriptorImageInfo depthInfo{VK_NULL_HANDLE, m_depth.view,
+                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            VkDescriptorImageInfo targetInfo{VK_NULL_HANDLE, m_splatColour.view,
+                                             VK_IMAGE_LAYOUT_GENERAL};
+            const auto writeImage = [&](std::uint32_t binding, VkDescriptorType type,
+                                        const VkDescriptorImageInfo* image) {
+                VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                entry.dstSet = set;
+                entry.dstBinding = binding;
+                entry.descriptorCount = 1;
+                entry.descriptorType = type;
+                entry.pImageInfo = image;
+                writes.push_back(entry);
+            };
+            writeImage(kSplatDepthBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &depthInfo);
+            writeImage(kSplatTargetBinding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &targetInfo);
 
             vkUpdateDescriptorSets(m_context.device,
                                    static_cast<std::uint32_t>(writes.size()),
@@ -1776,15 +1890,20 @@ namespace r4d::vulkan
         // This slot's buffers were last touched two frames ago and renderFrame
         // has already waited on that frame's fence, so nothing here needs a
         // barrier against the previous frame's reads.
-        const auto dispatch = [&](SortStage stage, std::uint32_t pass,
+        const auto dispatch = [&](SortStage stage, std::uint32_t section,
                                   std::uint32_t groups) {
+            // Sections past the depth passes belong to the tile sort, which
+            // reads the pair buffers through its own set.
+            const bool tilePass = section >= kSortPasses;
             const std::uint32_t offsets[] = {
                 static_cast<std::uint32_t>(frameIndex * m_frameStride),
-                static_cast<std::uint32_t>(pass * m_sortConstantStride)};
+                static_cast<std::uint32_t>(section * m_sortConstantStride)};
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                               m_sortPipelines[static_cast<std::size_t>(stage)]);
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                    m_sortPipelineLayout, 0, 1, &m_sortSets[frameIndex],
+                                    m_sortPipelineLayout, 0, 1,
+                                    tilePass ? &m_tileSortSets[frameIndex]
+                                             : &m_sortSets[frameIndex],
                                     static_cast<std::uint32_t>(std::size(offsets)),
                                     offsets);
             vkCmdDispatch(commandBuffer, groups, 1, 1);
@@ -1804,19 +1923,139 @@ namespace r4d::vulkan
             dispatch(SortStage::Scatter, pass, m_sortTileCount);
         }
 
-        // The order and the projections are read by the vertex shader for the
-        // rest of the frame.
-        memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                      VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        // Tile binning. The pairs are generated by walking the depth order, so
+        // they start out sorted by depth; the tile sort below is stable, which
+        // leaves every tile's slice still in depth order.
+        dispatch(SortStage::BinCount, 0, m_sortTileCount);
+        dispatch(SortStage::ScanGroups, 0, m_sortTileCount);
+        dispatch(SortStage::ScanGroupSums, 0, 1);
+        dispatch(SortStage::ScanAdd, 0, m_sortTileCount);
+        dispatch(SortStage::Bin, 0, m_pairTileCount);
+
+        for (std::uint32_t pass = 0; pass < kTileSortPasses; ++pass)
+        {
+            const std::uint32_t section = kSortPasses + pass;
+            dispatch(SortStage::Histogram, section, m_pairTileCount);
+            dispatch(SortStage::ScanRows, section, kSortBuckets);
+            dispatch(SortStage::ScanTotals, section, 1);
+            dispatch(SortStage::Scatter, section, m_pairTileCount);
+        }
+
+        const std::uint32_t tilesX = (m_size.x + kSplatTileSize - 1) / kSplatTileSize;
+        const std::uint32_t tilesY = (m_size.y + kSplatTileSize - 1) / kSplatTileSize;
+        dispatch(SortStage::TileRangesReset, 0,
+                 (tilesX * tilesY + kSortGroupSize - 1) / kSortGroupSize);
+        dispatch(SortStage::TileRanges, 0, m_pairTileCount);
+    }
+
+    void VulkanRenderer::rasteriseSplats(VkCommandBuffer commandBuffer,
+                                        std::uint32_t frameIndex)
+    {
+        if (m_gaussianCount == 0 || m_sortPipelineLayout == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        // The mesh pass wrote the depth this reads, and the composite will read
+        // the colour this writes.
+        imageBarrier(commandBuffer, m_depth.handle,
+                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+        imageBarrier(commandBuffer, m_splatColour.handle, VK_IMAGE_LAYOUT_UNDEFINED,
+                     VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE, 0,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+
+        const std::uint32_t offsets[] = {
+            static_cast<std::uint32_t>(frameIndex * m_frameStride), 0u};
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          m_sortPipelines[static_cast<std::size_t>(SortStage::Raster)]);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                m_sortPipelineLayout, 0, 1, &m_sortSets[frameIndex],
+                                static_cast<std::uint32_t>(std::size(offsets)), offsets);
+
+        const std::uint32_t tilesX = (m_size.x + kSplatTileSize - 1) / kSplatTileSize;
+        const std::uint32_t tilesY = (m_size.y + kSplatTileSize - 1) / kSplatTileSize;
+        vkCmdDispatch(commandBuffer, tilesX, tilesY, 1);
+
+        imageBarrier(commandBuffer, m_splatColour.handle, VK_IMAGE_LAYOUT_GENERAL,
+                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+        imageBarrier(commandBuffer, m_depth.handle,
+                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                     VK_IMAGE_ASPECT_DEPTH_BIT);
+    }
+
+    // The rasteriser's depth and colour views change on resize; the sets that
+    // name them outlive it, so they are rewritten rather than reallocated.
+    void VulkanRenderer::updateSplatImageDescriptors()
+    {
+        if (m_gaussianCount == 0 || m_splatColour.view == VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        std::vector<VkWriteDescriptorSet> writes;
+        VkDescriptorImageInfo depthInfo{VK_NULL_HANDLE, m_depth.view,
+                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo storageInfo{VK_NULL_HANDLE, m_splatColour.view,
+                                          VK_IMAGE_LAYOUT_GENERAL};
+        VkDescriptorImageInfo sampledInfo{VK_NULL_HANDLE, m_splatColour.view,
+                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+        const auto write = [&](VkDescriptorSet set, std::uint32_t binding,
+                               VkDescriptorType type, const VkDescriptorImageInfo* image) {
+            if (set == VK_NULL_HANDLE)
+            {
+                return;
+            }
+            VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            entry.dstSet = set;
+            entry.dstBinding = binding;
+            entry.descriptorCount = 1;
+            entry.descriptorType = type;
+            entry.pImageInfo = image;
+            writes.push_back(entry);
+        };
+
+        for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
+        {
+            write(m_sortSets[i], kSplatDepthBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                  &depthInfo);
+            write(m_sortSets[i], kSplatTargetBinding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                  &storageInfo);
+            write(m_tileSortSets[i], kSplatDepthBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                  &depthInfo);
+            write(m_tileSortSets[i], kSplatTargetBinding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                  &storageInfo);
+            write(m_splatSets[i], kGaussianBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                  &sampledInfo);
+        }
+
+        if (!writes.empty())
+        {
+            vkUpdateDescriptorSets(m_context.device,
+                                   static_cast<std::uint32_t>(writes.size()), writes.data(),
+                                   0, nullptr);
+        }
     }
 
     Status VulkanRenderer::createSplatDescriptors()
     {
         const VkDescriptorPoolSize sizes[] = {
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, kFramesInFlight},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight * 2},
+            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kFramesInFlight},
         };
 
         VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -1838,30 +2077,17 @@ namespace r4d::vulkan
 
         for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
         {
-            VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0, sizeof(FrameConstants)};
-            VkDescriptorBufferInfo projectionInfo{m_sortBuffers[i].projections.handle, 0,
-                                                  VK_WHOLE_SIZE};
-            VkDescriptorBufferInfo orderInfo{m_gaussianOrder[i].handle, 0, VK_WHOLE_SIZE};
+            VkDescriptorImageInfo colourInfo{VK_NULL_HANDLE, m_splatColour.view,
+                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-            VkWriteDescriptorSet writes[3]{};
-            const auto write = [&](std::size_t index, std::uint32_t binding,
-                                   VkDescriptorType type,
-                                   const VkDescriptorBufferInfo* buffer) {
-                writes[index] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-                writes[index].dstSet = m_splatSets[i];
-                writes[index].dstBinding = binding;
-                writes[index].descriptorCount = 1;
-                writes[index].descriptorType = type;
-                writes[index].pBufferInfo = buffer;
-            };
-            write(0, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &frameInfo);
-            write(1, kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                  &projectionInfo);
-            write(2, kGaussianOrderBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &orderInfo);
+            VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            write.dstSet = m_splatSets[i];
+            write.dstBinding = kGaussianBinding;
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            write.pImageInfo = &colourInfo;
 
-            vkUpdateDescriptorSets(m_context.device,
-                                   static_cast<std::uint32_t>(std::size(writes)), writes, 0,
-                                   nullptr);
+            vkUpdateDescriptorSets(m_context.device, 1, &write, 0, nullptr);
         }
 
         return Status::Ok();
@@ -1878,15 +2104,16 @@ namespace r4d::vulkan
 
         // Alpha compositing is order-dependent, so the splats go far to near.
         // sortSplats produced that order on the GPU earlier in this frame.
+        // The tile rasteriser already composited the splats among themselves;
+        // this puts that image over the mesh.
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_splatPipeline);
-        const std::uint32_t offset = static_cast<std::uint32_t>(frameIndex * m_frameStride);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                m_splatPipelineLayout, 0, 1, &m_splatSets[frameIndex], 1,
-                                &offset);
-        vkCmdDraw(commandBuffer, 4, m_gaussianCount, 0, 0);
+                                m_splatPipelineLayout, 0, 1, &m_splatSets[frameIndex], 0,
+                                nullptr);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
         ++drawCalls;
-        triangles += m_gaussianCount * 2;
+        triangles += 1;
     }
 
     Status VulkanRenderer::uploadModel(const Model& model)
@@ -2359,7 +2586,24 @@ namespace r4d::vulkan
             }
         }
 
-        renderSplats(frame.commandBuffer, frameIndex, drawCalls, triangles);
+        if (m_gaussianCount != 0)
+        {
+            // Dynamic rendering has to end before a dispatch, and the
+            // rasteriser needs the depth the mesh pass just wrote.
+            vkCmdEndRendering(frame.commandBuffer);
+            rasteriseSplats(frame.commandBuffer, frameIndex);
+
+            VkRenderingAttachmentInfo compositeAttachment = colourAttachment;
+            compositeAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            VkRenderingInfo compositeRendering = rendering;
+            compositeRendering.pColorAttachments = &compositeAttachment;
+            compositeRendering.pDepthAttachment = nullptr;
+            vkCmdBeginRendering(frame.commandBuffer, &compositeRendering);
+            vkCmdSetViewport(frame.commandBuffer, 0, 1, &viewport);
+            vkCmdSetScissor(frame.commandBuffer, 0, 1, &scissor);
+
+            renderSplats(frame.commandBuffer, frameIndex, drawCalls, triangles);
+        }
 
         renderUi(frame.commandBuffer);
 
@@ -2454,6 +2698,8 @@ namespace r4d::vulkan
         if (m_headless)
         {
             R4D_TRY(createOffscreenTarget(newSize));
+            R4D_TRY(createSplatTargets(newSize));
+            updateSplatImageDescriptors();
         }
         else
         {
@@ -2461,6 +2707,8 @@ namespace r4d::vulkan
             R4D_TRY(createSwapchain(newSize));
         }
         R4D_TRY(createDepthImage(m_size));
+        R4D_TRY(createSplatTargets(m_size));
+        updateSplatImageDescriptors();
 
         m_swapchainDirty = false;
         m_hasRenderedFrame = false;
@@ -2653,6 +2901,7 @@ namespace r4d::vulkan
 
             destroyImage(m_shadowMap);
             destroyImage(m_depth);
+            destroyImage(m_splatColour);
             destroyImage(m_offscreen);
             destroySwapchain();
 

@@ -9,8 +9,10 @@
 // possible key and a zero radius, so it sorts behind everything and collapses
 // to a quad the rasteriser discards.
 //
-// The rejections are exact: a splat is dropped only when it cannot colour a
-// pixel. That is what lets the stored reference images stay untouched.
+// Every rejection here but one is exact: the splat is dropped only when it
+// cannot colour a pixel. The exception is the depth-validity fade below, which
+// weights a splat by how much of the Jacobian's linearisation still holds
+// across its own depth extent and so does change the image.
 #include "Splat.hlsli"
 #include "SplatSort.hlsli"
 
@@ -135,6 +137,36 @@ void main(uint3 thread : SV_DispatchThreadID)
         0.0f,           0.0f,            0.0f);
 
     const float3x3 viewRotation = (float3x3)g_frame.view;
+
+    // The clamp above keeps the Jacobian honest off the axis; this keeps it
+    // honest in depth. Linearising 1/z at the centre drops the terms quadratic
+    // in the depth offset inside the splat, and because a Gaussian is
+    // symmetric in depth the first-order over- and under-magnification cancel,
+    // so the leading error left in the projected covariance goes as
+    // (sigma_z / z)^2. Written in the three-sigma extent the renderer already
+    // uses for the radius and the quad, that is this ratio squared, and at 1
+    // the near end of that extent has reached the eye plane: the camera is
+    // inside the splat and the projection has stopped meaning anything.
+    //
+    // Weighting the splat by how much of the linearisation survives therefore
+    // leaves an ordinary splat alone -- a tenth of its depth away costs it one
+    // per cent -- and fades out the ones the camera has walked into. Both ends
+    // come from that convention rather than from a threshold picked to suit a
+    // picture, and the fade is smooth in the camera's position, so nothing
+    // pops as it moves.
+    const float3 viewAxis = float3(viewRotation._31, viewRotation._32, viewRotation._33);
+    const float depthExtent =
+        3.0f * sqrt(max(dot(viewAxis, mul(sigma, viewAxis)), 0.0f)) * invZ;
+    const float validity = saturate(1.0f - depthExtent * depthExtent);
+
+    // Faded under the same alpha floor, the splat can no longer colour a pixel
+    // either, so the early-out above applies again to what the fade leaves.
+    const float opacity = g.opacity * validity;
+    if (opacity < 1.0f / 255.0f)
+    {
+        return;
+    }
+
     const float3x3 t = mul(jacobian, viewRotation);
     const float3x3 covariance = mul(mul(t, sigma), transpose(t));
 
@@ -177,7 +209,7 @@ void main(uint3 thread : SV_DispatchThreadID)
     projection.radius = radius;
     projection.depth = clip.z / clip.w;
     projection.conic = float3(c * invDeterminant, -b * invDeterminant, a * invDeterminant);
-    projection.opacity = g.opacity;
+    projection.opacity = opacity;
     projection.colour = evaluateSh(g, normalize(g.position - g_frame.cameraPosition));
     projection.padding = 0.0f;
     g_projections[index] = projection;

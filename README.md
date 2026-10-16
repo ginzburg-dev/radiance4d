@@ -283,6 +283,11 @@ measured frames:
 | INRIA `truck`, 2.54M splats, GPU sort | 1920x1080 | D3D12 | 14.718 ms | 14.698 ms |
 | INRIA `truck`, 2.54M splats, GPU sort | 1920x1080 | Vulkan | 14.045 ms | 14.018 ms |
 
+The `train` and `truck` rows at 1920x1080 were measured before the pair capacity was made to follow
+demand, so every one of them rendered that view without its nearest splats; the corrected per-pass
+figures are further down. They are left as measured rather than restated, because what they record
+is what those builds did.
+
 **What these do and do not show.** The mesh scene never loads the GPU: 1.18 million triangles cost
 0.41 ms, and quadrupling the pixel count to 4K only reaches 0.57 ms, so the frame is bounded by
 fixed per-frame cost rather than by geometry or fill. Headless means no present, so swapchain cost
@@ -375,12 +380,13 @@ they start out sorted by depth, and the tile sort is the same stable radix sort 
 alone, which leaves each tile's slice in depth order. Two passes cover a 16-bit tile id. The
 rasteriser walks a slice backwards to composite near to far.
 
-Capacity for the pairs is fixed when a cloud is uploaded, at eight per splat, which for `train` is
-8,212,224 slots. The frame reads the scan's grand total back and reports a view that needed more
-instead of dropping splats silently. How full that is depends entirely on the camera: the 1280x720
-`--orbit-yaw 150` view above fills 4,547,915 of it, the same view at 1080p fills 7,571,308, and the
-default 1080p framing the benchmark rows use wants 8,902,955 and overflows, so that row is missing
-691k pairs' worth of splats. Sorting the slots nobody filled is addressed below.
+Capacity for the pairs starts at eight per splat when a cloud is uploaded, which for `train` is
+8,212,224 slots, and the frame reads the scan's grand total back. How full that is depends entirely
+on the camera: the 1280x720 `--orbit-yaw 150` view above fills 4,547,915 of it, the same view at
+1080p fills 7,571,308, and the default 1080p framing the benchmark rows use wants 8,902,955. A yaw
+sweep at 1080p puts the worst view at `--orbit-yaw 30`, which wants 9,966,714 — the default framing
+overflowed, but it is not the worst case. What happens when a view wants more is below; sorting the
+slots nobody filled is addressed further down.
 
 This is also where the stored WARP reference moved. The quad pass blended into the 8-bit render
 target once per splat, so hundreds of overlapping splats accumulated hundreds of roundings; the
@@ -465,8 +471,9 @@ Vulkan (2.836 to 6.395), because the sort walked all of it. Bounded, the same do
 and 0.641 ms (1.542 to 1.685, 1.980 to 2.621) — the remaining cost being the idle groups that still
 launch. On the overflowing 1080p view, sixteen per splat stops dropping splats at all, and costs
 0.39 ms of tile sort instead of 2.10 — 2.784 to 3.176 bounded, against 2.830 to 4.934 unbounded.
-Capacity was left at eight here because sixteen doubles the pair buffers and changes that 1080p
-image; the point is that it is now a memory decision rather than a frame-time one.
+Capacity was left at eight by that change because sixteen doubles the pair buffers and changes that
+1080p image; the point is that it became a memory decision rather than a frame-time one. That
+decision is below.
 
 Indirect dispatch was considered and not used. The groups past the window still launch before they
 retire, and that is what it would remove — the residual the capacity-doubling figures above measure
@@ -476,6 +483,76 @@ stride and need the live tile count inside the shader either way. Against that r
 argument buffer, a kernel to fill it and a root-signature change on both backends, and it is
 unverified on the pinned WARP that `SplatRender_test` runs on, where `ExecuteIndirect` with a draw
 argument was already found to draw nothing. Those numbers are what say when to revisit it.
+
+**The 1080p benchmark view was dropping splats, and it is the nearest ones that went.** The pairs
+are laid out in depth order, so an overflow never loses an arbitrary sample of the scene: it loses
+whatever sits past the end of the buffer, which is the near end of the depth order. The default
+`train` framing at 1920x1080 wanted 8,902,955 pairs against the 8,212,224 it held, so every row in
+this document measured on that view was rendering without its closest 691k pairs' worth of splats.
+Vulkan had no readback for the total at all and so never said a word about it.
+
+Raising the per-splat multiple was the obvious fix and it is aimed the wrong way. Pair demand
+follows how much screen the splats cover, not how many of them there are, and `truck` settles that:
+at 2,541,226 splats, 2.5x `train`, it wants 6,138,642 to 7,249,212 pairs at 1080p against `train`'s
+8,902,955 to 9,966,714. Eight per splat already leaves `truck` holding 20.3M slots it cannot use
+while `train` overflows at 8.21M, and doubling the multiple would take `truck` to 40.7M slots —
+1.24 GiB of pair buffers for a 7.25M need.
+
+Clamping the tile span harder does not reach either, and the distribution is why. Reading the
+per-splat tile counts back at the default 1080p view: 888,274 splats produce pairs, the median
+covers 4 tiles and the 90th percentile 16, but the tail is heavy — 8,127 splats spanning 129 to
+1024 tiles hold 31% of the pairs. Skewed, but not a handful. Fitting 8.21M needs the clamp down at
+256 tiles, which truncates 3,490 splats at the default view and 5,094 at the worst one and leaves
+0.8% of headroom; at 512 it does not fit at all. A clamp also cuts a splat's box off in row order,
+so what it buys is a hard edge through the largest splats on screen.
+
+So the capacity stops being a guess after one frame instead. The binning scan already computes the
+exact total on the GPU, and that total is correct even for a frame that overflowed, because the
+counts it sums are never clamped to the capacity. A frame that wants more grows the four pair
+buffers and the shared histogram to that total plus a quarter, once, with the queue drained. Past
+thirty-two pairs per splat the view is refused and reported rather than grown into. `train` at
+1080p grows 8,212,224 to 11,128,832 — 313.3 to 424.5 MiB of pair buffers across both frame slots —
+and never again; at 3840x2160 it grows once to 29,810,176 (1137.2 MiB); `truck` at 1080p never
+grows at all.
+
+`train`, `--benchmark 200`, mean of three runs per build interleaved with the build before the
+change:
+
+| Pass | D3D12 before | D3D12 after | Vulkan before | Vulkan after |
+|---|---|---|---|---|
+| Cull | 0.907 ms | 0.911 ms | 0.744 ms | 0.748 ms |
+| Depth sort | 0.831 ms | 0.830 ms | 0.747 ms | 0.748 ms |
+| Binning | 1.171 ms | 1.457 ms | 1.045 ms | 1.331 ms |
+| Tile sort | 2.789 ms | 3.064 ms | 4.011 ms | 4.403 ms |
+| Rasterise | 4.123 ms | 4.420 ms | 3.858 ms | 4.126 ms |
+| Composite | 0.035 ms | 0.033 ms | 0.034 ms | 0.033 ms |
+| whole-frame pair | 9.865 ms | 10.724 ms | 10.451 ms | 11.399 ms |
+
+The frame costs 0.86 ms more on D3D12 and 0.95 on Vulkan, and all of it is in the three passes that
+now have more to do. Binning writes 691k more pairs (+0.29 ms on both). The tile sort sorts them
+(+0.27 and +0.39) — and because it is already bounded by the real pair total, that is the cost of
+the extra pairs and not of the larger buffers. The rasteriser composites the splats that were
+missing (+0.30 and +0.27). Cull, depth sort and composite move by at most 0.004 ms, which is the
+control.
+
+At 1280x720 `--orbit-yaw 150`, which does not overflow and never grows, every pass moves by at most
+0.018 ms and the frame by −0.016 on D3D12 and −0.022 on Vulkan: the change costs nothing where it
+is not needed. The one-off growth is 48.9 to 53.4 ms on D3D12 and 31.2 to 31.8 on Vulkan, most of
+it the queue drain, and it happens inside the benchmark's 64 warm-up frames.
+
+**The 1080p image changes on 73.7% of its pixels, and it looks worse.** That is the honest result
+and it is worth being plain about. The splats the overflow was dropping are the nearest ones, and
+in this scene the nearest ones are the huge-scale splats that produce the streaking already noted
+above — seen from inside the scene, a splat with a very large scale smears across the frame. The
+overflow had been acting as an accidental declutter, and removing it reveals a defect that was
+always there. The fix is correct: the output is now byte-identical, on both backends, to a build
+given capacity to spare, which is what the scene actually contains. The streaking is a separate
+open defect, and the rows above are the first ones here measured on a view that is not missing
+splats.
+
+The 1280x720 `--orbit-yaw 150` screenshot does not move. It was verified byte-identical on both
+backends rather than assumed, because that view never overflowed. The stored WARP reference did not
+move either — `SplatRender_test` renders small enough that its capacity is never reached.
 
 A sampling profiler is still outstanding. This attributes GPU time per pass, not per instruction,
 and it cannot say why a pass costs what it does.

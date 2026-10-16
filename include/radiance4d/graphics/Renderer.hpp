@@ -37,6 +37,10 @@ namespace r4d
         bool enableGpuValidation = false;
         bool vsync = true;
 
+        // Per-pass GPU timestamps. Off reduces the frame to the single pair that
+        // reports gpuFrameMs, which is how the scopes' own cost is measured.
+        bool passTimings = true;
+
         // Seconds per frame instead of the wall clock. Required for a
         // reproducible capture.
         double fixedTimeStep = 0.0;

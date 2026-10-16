@@ -26,7 +26,7 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 | Orbit and free-fly cameras | working |
 | glTF loading (cgltf) | working |
 | PBR shading, analytic lights | working |
-| Base colour, metallic-roughness, normal maps | working |
+| Base colour, metallic-roughness, normal and emissive maps | working |
 | ImGui statistics overlay | working (both backends) |
 | Image-based lighting (procedural sky) | working |
 | Shadow mapping (key light, PCF) | working |
@@ -45,6 +45,8 @@ Milestone M3 complete, M4 under way. Features marked *planned* are not implement
 | Dynamic 4D Gaussians | planned (M8) |
 
 ![Material grid](docs/images/material-grid.png)
+
+![Damaged Helmet](docs/images/damaged-helmet.png)
 
 ## Gaussian splatting
 

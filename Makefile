@@ -9,7 +9,8 @@ CONFIG      ?= Debug
 BUILD_DIR   := build/$(PRESET)
 JOBS        ?= 16
 
-# Visual Studio ships clang-format; PATH usually does not have it.
+# Visual Studio ships clang-format 19; PATH usually does not have it. CI pins
+# the same version, because clang-format releases disagree about formatting.
 CLANG_FORMAT ?= $(shell command -v clang-format 2>/dev/null || \
 	echo "/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/bin/clang-format.exe")
 PYTHON      ?= python

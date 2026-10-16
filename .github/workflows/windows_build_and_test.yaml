@@ -14,9 +14,13 @@ jobs:
   # Cheap and first: an unformatted tree fails before a runner spends ten
   # minutes building it.
   format:
-    runs-on: windows-latest
+    # Linux and a pinned clang-format: the check has to be the same binary
+    # everywhere, because versions disagree about what formatted means.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: pipx install clang-format==19.1.5
       - name: clang-format
         shell: bash
         run: |

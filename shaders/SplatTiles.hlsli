@@ -26,8 +26,8 @@
 // start. Indexed by position in the depth order, not by splat index.
 RWStructuredBuffer<uint> g_tileCounts  : register(u7);
 RWStructuredBuffer<uint> g_tileOffsets : register(u8);
-// Scan scratch: one entry per group, plus a final slot for the grand total.
-RWStructuredBuffer<uint> g_groupSums   : register(u9);
+// The scan scratch the pair total comes out of is declared in SplatSort.hlsli,
+// where the radix kernels that size themselves from it can see it.
 
 // The pairs themselves, ping-ponged by the tile sort exactly as the depth sort
 // ping-pongs its keys.

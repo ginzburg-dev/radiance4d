@@ -42,8 +42,8 @@ struct SortConstants
     uint shift;       // bit offset of this pass's digit
     uint sourceIsB;   // which half of the ping-pong this pass reads
     uint pairCapacity;   // how many (tile, splat) pairs the buffers hold
-    uint padding1;
-    uint padding2;
+    uint pairTotalSlot;  // where the binning scan leaves the pair grand total
+    uint pairPass;       // set when this pass sorts pairs rather than depths
 };
 
 ConstantBuffer<SortConstants> g_sort : register(b1);
@@ -60,6 +60,34 @@ RWStructuredBuffer<uint> g_digitBase : register(u5);
 
 // Written by the cull pass, read by the draw.
 RWStructuredBuffer<SplatProjection> g_projections : register(u6);
+
+// Scan scratch: one entry per group, plus a final slot for the grand total.
+// Declared here rather than with the rest of the binning state because the
+// shared radix kernels read that total to size themselves.
+RWStructuredBuffer<uint> g_groupSums : register(u9);
+
+// The pairs the binning scan counted, clamped to what the buffers hold. An
+// overflowing view is reported, not grown.
+uint sortPairTotal()
+{
+    return min(g_groupSums[g_sort.pairTotalSlot], g_sort.pairCapacity);
+}
+
+// That total rounded up to a whole group: the window a pair pass has to cover.
+// Every slot past it holds filler, and sorting filler answers nothing.
+uint sortPairWindow()
+{
+    return ((sortPairTotal() + R4D_SORT_GROUP_SIZE - 1u) / R4D_SORT_GROUP_SIZE) *
+           R4D_SORT_GROUP_SIZE;
+}
+
+// How many elements this pass has to touch. A depth pass has the padded count,
+// fixed once the cloud is uploaded; a pair pass has only what this frame's
+// binning filled, which the camera changes every frame.
+uint sortActiveCount()
+{
+    return g_sort.pairPass != 0u ? min(sortPairWindow(), g_sort.count) : g_sort.count;
+}
 
 uint sortReadKey(uint i)
 {

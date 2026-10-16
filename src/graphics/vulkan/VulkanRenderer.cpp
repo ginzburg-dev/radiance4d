@@ -96,7 +96,8 @@ namespace r4d::vulkan
             std::uint32_t shift;
             std::uint32_t sourceIsB;
             std::uint32_t pairCapacity;
-            std::uint32_t padding[2];
+            std::uint32_t pairTotalSlot;
+            std::uint32_t pairPass;
         };
         static_assert(sizeof(SortConstants) == 32);
 
@@ -1699,6 +1700,10 @@ namespace r4d::vulkan
             // sections differ only in how many elements there are.
             constants.count = tilePass ? m_pairCapacity : m_sortPaddedCount;
             constants.tileCount = tilePass ? m_pairTileCount : m_sortTileCount;
+            // The binning scan leaves the pair total one past the per-group
+            // sums; a pair pass sizes itself from it instead of the capacity.
+            constants.pairTotalSlot = m_sortTileCount;
+            constants.pairPass = tilePass ? 1u : 0u;
             constants.shift = pass * kSortDigitBits;
             // Pass 0 reads A, and an even pass count brings the result home.
             constants.sourceIsB = pass & 1u;
@@ -1987,7 +1992,7 @@ namespace r4d::vulkan
             const std::uint32_t tilesY = (m_size.y + kSplatTileSize - 1) / kSplatTileSize;
             dispatch(SortStage::TileRangesReset, 0,
                      (tilesX * tilesY + kSortGroupSize - 1) / kSortGroupSize);
-            dispatch(SortStage::TileRanges, 0, m_pairTileCount);
+            dispatch(SortStage::TileRanges, kSortPasses, m_pairTileCount);
         }
     }
 

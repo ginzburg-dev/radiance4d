@@ -81,7 +81,8 @@ namespace r4d::d3d12
             std::uint32_t shift;
             std::uint32_t sourceIsB;
             std::uint32_t pairCapacity;
-            std::uint32_t padding[2];
+            std::uint32_t pairTotalSlot;
+            std::uint32_t pairPass;
         };
         static_assert(sizeof(SortConstants) == 32);
         constexpr UINT kSortRootConstants = sizeof(SortConstants) / sizeof(UINT32);
@@ -1775,6 +1776,8 @@ namespace r4d::d3d12
         constants.splatCount = m_gaussianCount;
         constants.tileCount = m_sortTileCount;
         constants.pairCapacity = m_pairCapacity;
+        // The binning scan leaves the pair total one past the per-group sums.
+        constants.pairTotalSlot = m_sortTileCount;
 
         const auto dispatch = [&](SortStage stage, UINT groups) {
             m_commandList->SetPipelineState(
@@ -1868,6 +1871,9 @@ namespace r4d::d3d12
 
             constants.count = m_pairCapacity;
             constants.tileCount = m_pairTileCount;
+            // From here the kernels size themselves from the pair total rather
+            // than from the capacity, which the ranges pass below also wants.
+            constants.pairPass = 1;
             for (UINT pass = 0; pass < 2; ++pass)
             {
                 constants.shift = pass * kSortDigitBits;
@@ -1965,6 +1971,7 @@ namespace r4d::d3d12
         constants.splatCount = m_gaussianCount;
         constants.tileCount = m_sortTileCount;
         constants.pairCapacity = m_pairCapacity;
+        constants.pairTotalSlot = m_sortTileCount;
         m_commandList->SetComputeRoot32BitConstants(1, kSortRootConstants, &constants, 0);
 
         m_commandList->SetPipelineState(

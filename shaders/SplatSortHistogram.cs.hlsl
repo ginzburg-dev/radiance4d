@@ -10,6 +10,13 @@ groupshared uint s_counts[R4D_SORT_BUCKETS];
 void main(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID,
           uint3 thread : SV_DispatchThreadID)
 {
+    // The window is a whole number of groups, so this is uniform: a group is
+    // either entirely inside it or has nothing to count.
+    if (group.x * R4D_SORT_GROUP_SIZE >= sortActiveCount())
+    {
+        return;
+    }
+
     s_counts[local.x] = 0u;
     GroupMemoryBarrierWithGroupSync();
 

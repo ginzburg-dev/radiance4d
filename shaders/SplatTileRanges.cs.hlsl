@@ -10,7 +10,8 @@
 void main(uint3 thread : SV_DispatchThreadID)
 {
     const uint pair = thread.x;
-    if (pair >= g_sort.pairCapacity)
+    const uint active = sortActiveCount();
+    if (pair >= active)
     {
         return;
     }
@@ -25,7 +26,7 @@ void main(uint3 thread : SV_DispatchThreadID)
     {
         g_tileRanges[tile * 2u] = pair;
     }
-    if (pair + 1u == g_sort.pairCapacity || g_pairTileA[pair + 1u] != tile)
+    if (pair + 1u == active || g_pairTileA[pair + 1u] != tile)
     {
         g_tileRanges[tile * 2u + 1u] = pair + 1u;
     }

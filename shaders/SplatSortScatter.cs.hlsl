@@ -22,6 +22,12 @@ groupshared uint s_mask[R4D_SORT_BUCKETS][R4D_SORT_MASK_WORDS];
 void main(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID,
           uint3 thread : SV_DispatchThreadID)
 {
+    // Uniform across the group, as in the histogram.
+    if (group.x * R4D_SORT_GROUP_SIZE >= sortActiveCount())
+    {
+        return;
+    }
+
     [unroll]
     for (uint word = 0u; word < R4D_SORT_MASK_WORDS; ++word)
     {

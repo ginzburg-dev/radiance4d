@@ -11,6 +11,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap and first: an unformatted tree fails before a runner spends ten
+  # minutes building it.
+  format:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format
+        shell: bash
+        run: |
+          fail=0
+          sources=$(git ls-files 'include/*.hpp' 'src/*.cpp' 'src/*.hpp' 'app/*.cpp' 'app/*.hpp' 'tests/*.cpp' 'tests/*.hpp')
+          for f in $sources; do
+            clang-format "$f" | diff -q - "$f" >/dev/null || { echo "unformatted: $f"; fail=1; }
+          done
+          exit $fail
+
   build-and-test:
     runs-on: windows-latest
 

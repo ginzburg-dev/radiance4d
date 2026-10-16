@@ -80,14 +80,22 @@ namespace r4d::d3d12
             std::uint32_t tileCount;
             std::uint32_t shift;
             std::uint32_t sourceIsB;
-            std::uint32_t padding[3];
+            std::uint32_t pairCapacity;
+            std::uint32_t padding[2];
         };
         static_assert(sizeof(SortConstants) == 32);
         constexpr UINT kSortRootConstants = sizeof(SortConstants) / sizeof(UINT32);
 
         // One root descriptor per buffer the sort binds: both halves of the
         // key and value ping-pong, the per-tile histograms and the digit bases.
-        constexpr UINT kSortUavCount = 7;
+        constexpr UINT kSortUavCount = 15;
+
+        // Must match R4D_TILE_SIZE in SplatTiles.hlsli.
+        constexpr UINT kSplatTileSize = 16;
+        // How many (tile, splat) pairs are allowed per splat on average. A
+        // frame that needs more drops the overflow, which is reported.
+        constexpr UINT kPairsPerSplat = 8;
+        constexpr DXGI_FORMAT kSplatColourFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
         // Mirrors SplatProjection in Splat.hlsli. GPU-only, so only its size
         // matters here, but the fields are named so the two can be compared.
@@ -287,6 +295,8 @@ namespace r4d::d3d12
         m_srvHeap.Reset();
         m_shadowPipeline.Reset();
         m_splatPipeline.Reset();
+        m_splatColour.Reset();
+        m_splatHeap.Reset();
         m_splatRootSignature.Reset();
         m_sortPipelines = {};
         m_sortRootSignature.Reset();
@@ -344,6 +354,7 @@ namespace r4d::d3d12
         }
 
         R4D_TRY(createDepthBuffer(m_size));
+        R4D_TRY(createSplatTargets(m_size));
         R4D_TRY(createShadowMap());
         R4D_TRY(createFrameResources());
 
@@ -503,7 +514,9 @@ namespace r4d::d3d12
         desc.Height = size.y;
         desc.DepthOrArraySize = 1;
         desc.MipLevels = 1;
-        desc.Format = kDepthFormat;
+        // Typeless, because the tile rasteriser reads the same texture as
+        // R32_FLOAT while the mesh pass writes it as D32_FLOAT.
+        desc.Format = DXGI_FORMAT_R32_TYPELESS;
         desc.SampleDesc.Count = 1;
         desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
@@ -724,6 +737,69 @@ namespace r4d::d3d12
 
         m_size = size;
         R4D_INFO("Offscreen target: {}x{}", size.x, size.y);
+        return Status::Ok();
+    }
+
+    Status D3D12Renderer::createSplatTargets(UVec2 size)
+    {
+        m_splatColour.Reset();
+
+        D3D12_RESOURCE_DESC1 desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = size.x;
+        desc.Height = size.y;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = kSplatColourFormat;
+        desc.SampleDesc.Count = 1;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        const auto heap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+        R4D_HR(m_device->CreateCommittedResource3(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                                  D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS,
+                                                  nullptr, nullptr, 0, nullptr,
+                                                  IID_PPV_ARGS(&m_splatColour)),
+               "CreateCommittedResource3 (splat colour)");
+        m_splatColour->SetName(L"Radiance4D Splat Colour");
+
+        if (!m_splatHeap)
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+            heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            heapDesc.NumDescriptors = 3;   // depth SRV, colour UAV, colour SRV
+            heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            R4D_HR(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_splatHeap)),
+                   "CreateDescriptorHeap (splat)");
+            m_splatHeap->SetName(L"Radiance4D Splat Heap");
+            m_splatDescriptorSize = m_device->GetDescriptorHandleIncrementSize(
+                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE handle =
+            m_splatHeap->GetCPUDescriptorHandleForHeapStart();
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC depthSrv{};
+        depthSrv.Format = DXGI_FORMAT_R32_FLOAT;
+        depthSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        depthSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        depthSrv.Texture2D.MipLevels = 1;
+        m_device->CreateShaderResourceView(m_depthBuffer.Get(), &depthSrv, handle);
+        handle.ptr += m_splatDescriptorSize;
+
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
+        uav.Format = kSplatColourFormat;
+        uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        m_device->CreateUnorderedAccessView(m_splatColour.Get(), nullptr, &uav, handle);
+        handle.ptr += m_splatDescriptorSize;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC colourSrv{};
+        colourSrv.Format = kSplatColourFormat;
+        colourSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        colourSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        colourSrv.Texture2D.MipLevels = 1;
+        m_device->CreateShaderResourceView(m_splatColour.Get(), &colourSrv, handle);
+
         return Status::Ok();
     }
 
@@ -1525,9 +1601,21 @@ namespace r4d::d3d12
         m_sortTileCount = (count + kSortGroupSize - 1) / kSortGroupSize;
         m_sortPaddedCount = m_sortTileCount * kSortGroupSize;
 
-        // Digit-major, one row of per-tile counts per digit.
+        // The pairs are bounded rather than grown: a frame needing more drops
+        // the overflow, which uploadGaussians reports as a limit.
+        m_pairCapacity =
+            ((count * kPairsPerSplat + kSortGroupSize - 1) / kSortGroupSize) * kSortGroupSize;
+        m_pairTileCount = m_pairCapacity / kSortGroupSize;
+
+        // Enough tile ranges for any viewport this renderer will be resized to.
+        constexpr UINT kMaxTiles =
+            ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
+            ((4320 + kSplatTileSize - 1) / kSplatTileSize);
+
+        // Digit-major, one row of per-tile counts per digit. The tile sort runs
+        // over the pairs, which is the larger of the two.
         const UINT64 histogramEntries =
-            static_cast<UINT64>(kSortBuckets) * m_sortTileCount;
+            static_cast<UINT64>(kSortBuckets) * std::max(m_sortTileCount, m_pairTileCount);
 
         const auto createSortBuffer = [&](UINT64 entries, const wchar_t* name,
                                           ComPtr<ID3D12Resource>& out) -> Status {
@@ -1558,6 +1646,33 @@ namespace r4d::d3d12
                                      sort.histogram));
             R4D_TRY(createSortBuffer(kSortBuckets, L"Radiance4D Splat Sort Digit Bases",
                                      sort.digitBase));
+
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, L"Radiance4D Splat Tile Counts",
+                                     sort.tileCounts));
+            R4D_TRY(createSortBuffer(m_sortPaddedCount, L"Radiance4D Splat Tile Offsets",
+                                     sort.tileOffsets));
+            // One slot per group, plus one for the grand total.
+            R4D_TRY(createSortBuffer(m_sortTileCount + 1, L"Radiance4D Splat Group Sums",
+                                     sort.groupSums));
+            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Tiles A",
+                                     sort.pairTileA));
+            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Tiles B",
+                                     sort.pairTileB));
+            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Splats A",
+                                     sort.pairSplatA));
+            R4D_TRY(createSortBuffer(m_pairCapacity, L"Radiance4D Splat Pair Splats B",
+                                     sort.pairSplatB));
+            R4D_TRY(createSortBuffer(kMaxTiles * 2, L"Radiance4D Splat Tile Ranges",
+                                     sort.tileRanges));
+
+            auto readbackDesc = bufferDesc(sizeof(std::uint32_t));
+            const auto readbackHeap = heapProperties(D3D12_HEAP_TYPE_READBACK);
+            R4D_HR(m_device->CreateCommittedResource(
+                       &readbackHeap, D3D12_HEAP_FLAG_NONE, &readbackDesc,
+                       D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                       IID_PPV_ARGS(&sort.pairTotalReadback)),
+                   "CreateCommittedResource (splat pair total readback)");
+            sort.pairTotalReadback->SetName(L"Radiance4D Splat Pair Total");
 
             // One projection per real splat; the sort's padding never reaches
             // the draw, so it needs none.
@@ -1643,7 +1758,11 @@ namespace r4d::d3d12
             sort.keysA.Get(),       sort.keysB.Get(),
             m_gaussianOrder[frameIndex].Get(), sort.valuesB.Get(),
             sort.histogram.Get(),   sort.digitBase.Get(),
-            sort.projections.Get()};
+            sort.projections.Get(), sort.tileCounts.Get(),
+            sort.tileOffsets.Get(), sort.groupSums.Get(),
+            sort.pairTileA.Get(),   sort.pairTileB.Get(),
+            sort.pairSplatA.Get(),  sort.pairSplatB.Get(),
+            sort.tileRanges.Get()};
         for (UINT i = 0; i < kSortUavCount; ++i)
         {
             m_commandList->SetComputeRootUnorderedAccessView(
@@ -1654,6 +1773,7 @@ namespace r4d::d3d12
         constants.count = m_sortPaddedCount;
         constants.splatCount = m_gaussianCount;
         constants.tileCount = m_sortTileCount;
+        constants.pairCapacity = m_pairCapacity;
 
         const auto dispatch = [&](SortStage stage, UINT groups) {
             m_commandList->SetPipelineState(
@@ -1679,17 +1799,93 @@ namespace r4d::d3d12
             dispatch(SortStage::Scatter, m_sortTileCount);
         }
 
+        // Tile binning. The pairs are generated by walking the depth order, so
+        // they start out sorted by depth; the tile sort below is stable, which
+        // leaves every tile's slice still in depth order.
+        dispatch(SortStage::BinCount, m_sortTileCount);
+        dispatch(SortStage::ScanGroups, m_sortTileCount);
+        dispatch(SortStage::ScanGroupSums, 1);
+        dispatch(SortStage::ScanAdd, m_sortTileCount);
+        dispatch(SortStage::Bin, m_pairTileCount);
+
+        // The scan left the pair total one past the per-group sums.
+        {
+            D3D12_BUFFER_BARRIER toCopy{};
+            toCopy.SyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+            toCopy.SyncAfter = D3D12_BARRIER_SYNC_COPY;
+            toCopy.AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+            toCopy.AccessAfter = D3D12_BARRIER_ACCESS_COPY_SOURCE;
+            toCopy.pResource = sort.groupSums.Get();
+            toCopy.Offset = 0;
+            toCopy.Size = UINT64_MAX;
+
+            D3D12_BARRIER_GROUP copyGroup{};
+            copyGroup.Type = D3D12_BARRIER_TYPE_BUFFER;
+            copyGroup.NumBarriers = 1;
+            copyGroup.pBufferBarriers = &toCopy;
+            m_commandList->Barrier(1, &copyGroup);
+
+            m_commandList->CopyBufferRegion(
+                sort.pairTotalReadback.Get(), 0, sort.groupSums.Get(),
+                static_cast<UINT64>(m_sortTileCount) * sizeof(std::uint32_t),
+                sizeof(std::uint32_t));
+
+            toCopy.SyncBefore = D3D12_BARRIER_SYNC_COPY;
+            toCopy.SyncAfter = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+            toCopy.AccessBefore = D3D12_BARRIER_ACCESS_COPY_SOURCE;
+            toCopy.AccessAfter = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+            m_commandList->Barrier(1, &copyGroup);
+        }
+
+        // The same radix sort, pointed at the pairs: two passes cover a tile id
+        // up to 16 bits, which is more than any viewport this renderer takes.
+        {
+            ID3D12Resource* const pairBuffers[4] = {sort.pairTileA.Get(),
+                                                    sort.pairTileB.Get(),
+                                                    sort.pairSplatA.Get(),
+                                                    sort.pairSplatB.Get()};
+            for (UINT i = 0; i < 4; ++i)
+            {
+                m_commandList->SetComputeRootUnorderedAccessView(
+                    3 + i, pairBuffers[i]->GetGPUVirtualAddress());
+            }
+
+            constants.count = m_pairCapacity;
+            constants.tileCount = m_pairTileCount;
+            for (UINT pass = 0; pass < 2; ++pass)
+            {
+                constants.shift = pass * kSortDigitBits;
+                constants.sourceIsB = pass & 1u;
+                dispatch(SortStage::Histogram, m_pairTileCount);
+                dispatch(SortStage::ScanRows, kSortBuckets);
+                dispatch(SortStage::ScanTotals, 1);
+                dispatch(SortStage::Scatter, m_pairTileCount);
+            }
+
+            for (UINT i = 0; i < 4; ++i)
+            {
+                m_commandList->SetComputeRootUnorderedAccessView(
+                    3 + i, buffers[i]->GetGPUVirtualAddress());
+            }
+        }
+
+        const UINT tilesX = (m_size.x + kSplatTileSize - 1) / kSplatTileSize;
+        const UINT tilesY = (m_size.y + kSplatTileSize - 1) / kSplatTileSize;
+        dispatch(SortStage::TileRangesReset,
+                 (tilesX * tilesY + kSortGroupSize - 1) / kSortGroupSize);
+        dispatch(SortStage::TileRanges, m_pairTileCount);
+
         D3D12_BUFFER_BARRIER barriers[2]{};
         barriers[0].SyncBefore = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-        barriers[0].SyncAfter = D3D12_BARRIER_SYNC_VERTEX_SHADING;
+        barriers[0].SyncAfter = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
         barriers[0].AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-        barriers[0].AccessAfter = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-        barriers[0].pResource = m_gaussianOrder[frameIndex].Get();
+        barriers[0].AccessAfter = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+        barriers[0].pResource = sort.tileRanges.Get();
         barriers[0].Offset = 0;
         barriers[0].Size = UINT64_MAX;
 
         barriers[1] = barriers[0];
-        barriers[1].pResource = sort.projections.Get();
+        barriers[1].pResource = sort.pairSplatA.Get();
 
         D3D12_BARRIER_GROUP group{};
         group.Type = D3D12_BARRIER_TYPE_BUFFER;
@@ -1698,39 +1894,124 @@ namespace r4d::d3d12
         m_commandList->Barrier(1, &group);
     }
 
-    void D3D12Renderer::renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
-                                     std::uint32_t& triangles)
+    void D3D12Renderer::rasteriseSplats(UINT frameIndex)
+    {
+        if (m_gaussianCount == 0 || !m_sortRootSignature)
+        {
+            return;
+        }
+
+        const SortBuffers& sort = m_sortBuffers[frameIndex];
+        const FrameContext& frame = m_frames[frameIndex];
+
+        // The mesh pass wrote the depth it is about to read.
+        submitTextureBarrier(
+            m_commandList.Get(),
+            textureBarrier(m_depthBuffer.Get(), D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+                           D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
+                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
+
+        ID3D12DescriptorHeap* heaps[] = {m_splatHeap.Get()};
+        m_commandList->SetDescriptorHeaps(1, heaps);
+        m_commandList->SetComputeRootSignature(m_sortRootSignature.Get());
+        m_commandList->SetComputeRootConstantBufferView(
+            0, frame.constantBuffer->GetGPUVirtualAddress());
+        m_commandList->SetComputeRootShaderResourceView(
+            2, m_gaussianBuffer->GetGPUVirtualAddress());
+
+        ID3D12Resource* const buffers[kSortUavCount] = {
+            sort.keysA.Get(),       sort.keysB.Get(),
+            m_gaussianOrder[frameIndex].Get(), sort.valuesB.Get(),
+            sort.histogram.Get(),   sort.digitBase.Get(),
+            sort.projections.Get(), sort.tileCounts.Get(),
+            sort.tileOffsets.Get(), sort.groupSums.Get(),
+            sort.pairTileA.Get(),   sort.pairTileB.Get(),
+            sort.pairSplatA.Get(),  sort.pairSplatB.Get(),
+            sort.tileRanges.Get()};
+        for (UINT i = 0; i < kSortUavCount; ++i)
+        {
+            m_commandList->SetComputeRootUnorderedAccessView(
+                3 + i, buffers[i]->GetGPUVirtualAddress());
+        }
+        m_commandList->SetComputeRootDescriptorTable(
+            3 + kSortUavCount, m_splatHeap->GetGPUDescriptorHandleForHeapStart());
+
+        SortConstants constants{};
+        constants.count = m_sortPaddedCount;
+        constants.splatCount = m_gaussianCount;
+        constants.tileCount = m_sortTileCount;
+        constants.pairCapacity = m_pairCapacity;
+        m_commandList->SetComputeRoot32BitConstants(1, kSortRootConstants, &constants, 0);
+
+        m_commandList->SetPipelineState(
+            m_sortPipelines[static_cast<std::size_t>(SortStage::Raster)].Get());
+        const UINT tilesX = (m_size.x + kSplatTileSize - 1) / kSplatTileSize;
+        const UINT tilesY = (m_size.y + kSplatTileSize - 1) / kSplatTileSize;
+        m_commandList->Dispatch(tilesX, tilesY, 1);
+
+        submitTextureBarrier(
+            m_commandList.Get(),
+            textureBarrier(m_depthBuffer.Get(), D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                           D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE));
+
+        // The composite reads what the rasteriser just wrote.
+        submitTextureBarrier(
+            m_commandList.Get(),
+            textureBarrier(m_splatColour.Get(), D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                           D3D12_BARRIER_SYNC_PIXEL_SHADING,
+                           D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                           D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS,
+                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
+    }
+
+    void D3D12Renderer::renderSplats(std::uint32_t& drawCalls, std::uint32_t& triangles)
     {
         if (m_gaussianCount == 0 || !m_splatPipeline)
         {
             return;
         }
 
-        // Alpha compositing is order-dependent, so the splats go far to near.
-        // sortSplats produced that order on the GPU earlier in this frame.
-        auto& frame = m_frames[frameIndex];
-        const SortBuffers& sort = m_sortBuffers[frameIndex];
+        // The tile rasteriser already composited the splats among themselves;
+        // this puts that image over the mesh.
+        ID3D12DescriptorHeap* heaps[] = {m_splatHeap.Get()};
+        m_commandList->SetDescriptorHeaps(1, heaps);
         m_commandList->SetPipelineState(m_splatPipeline.Get());
         m_commandList->SetGraphicsRootSignature(m_splatRootSignature.Get());
-        m_commandList->SetGraphicsRootConstantBufferView(
-            0, frame.constantBuffer->GetGPUVirtualAddress());
-        m_commandList->SetGraphicsRootShaderResourceView(
-            1, sort.projections->GetGPUVirtualAddress());
-        m_commandList->SetGraphicsRootShaderResourceView(
-            2, m_gaussianOrder[frameIndex]->GetGPUVirtualAddress());
-        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-        m_commandList->DrawInstanced(4, m_gaussianCount, 0, 0);
+        D3D12_GPU_DESCRIPTOR_HANDLE colour =
+            m_splatHeap->GetGPUDescriptorHandleForHeapStart();
+        colour.ptr += 2ull * m_splatDescriptorSize;   // depth SRV, colour UAV, colour SRV
+        m_commandList->SetGraphicsRootDescriptorTable(0, colour);
+
+        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_commandList->DrawInstanced(3, 1, 0, 0);
+
+        submitTextureBarrier(
+            m_commandList.Get(),
+            textureBarrier(m_splatColour.Get(), D3D12_BARRIER_SYNC_PIXEL_SHADING,
+                           D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                           D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                           D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS));
 
         ++drawCalls;
-        triangles += m_gaussianCount * 2;
+        triangles += 1;
     }
 
     Status D3D12Renderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
     {
         // Buffers only, so root descriptors are enough here too: no heap, no
         // table. 24 DWORDs of a 64-DWORD budget.
-        D3D12_ROOT_PARAMETER1 rootParameters[3 + kSortUavCount]{};
+        D3D12_ROOT_PARAMETER1 rootParameters[4 + kSortUavCount]{};
 
         rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -1759,6 +2040,28 @@ namespace r4d::d3d12
             parameter.Descriptor.ShaderRegister = i;
             parameter.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
         }
+
+        // Only the rasteriser uses these two, but one root signature across
+        // every splat kernel keeps the binding code in one place.
+        D3D12_DESCRIPTOR_RANGE1 textureRanges[2]{};
+        textureRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        textureRanges[0].NumDescriptors = 1;
+        textureRanges[0].BaseShaderRegister = 3;   // t3, the mesh depth
+        textureRanges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
+        textureRanges[0].OffsetInDescriptorsFromTableStart = 0;
+
+        textureRanges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+        textureRanges[1].NumDescriptors = 1;
+        textureRanges[1].BaseShaderRegister = 15;   // u15, the splat colour
+        textureRanges[1].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
+        textureRanges[1].OffsetInDescriptorsFromTableStart = 1;
+
+        D3D12_ROOT_PARAMETER1& tableParameter = rootParameters[3 + kSortUavCount];
+        tableParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        tableParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        tableParameter.DescriptorTable.NumDescriptorRanges =
+            static_cast<UINT>(std::size(textureRanges));
+        tableParameter.DescriptorTable.pDescriptorRanges = textureRanges;
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
         rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
@@ -1789,9 +2092,13 @@ namespace r4d::d3d12
 
         // Indexed by SortStage, so the order of these must match the enum.
         static constexpr std::string_view kStageShaders[] = {
-            "SplatCull.cs.dxil", "SplatSortHistogram.cs.dxil",
-            "SplatSortScanRows.cs.dxil", "SplatSortScanTotals.cs.dxil",
-            "SplatSortScatter.cs.dxil"};
+            "SplatCull.cs.dxil",          "SplatSortHistogram.cs.dxil",
+            "SplatSortScanRows.cs.dxil",  "SplatSortScanTotals.cs.dxil",
+            "SplatSortScatter.cs.dxil",   "SplatBinCount.cs.dxil",
+            "SplatScanGroups.cs.dxil",    "SplatScanGroupSums.cs.dxil",
+            "SplatScanAdd.cs.dxil",       "SplatBin.cs.dxil",
+            "SplatTileRangesReset.cs.dxil", "SplatTileRanges.cs.dxil",
+            "SplatRaster.cs.dxil"};
         static_assert(std::size(kStageShaders) ==
                       static_cast<std::size_t>(SortStage::Count));
 
@@ -1817,34 +2124,29 @@ namespace r4d::d3d12
 
     Status D3D12Renderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
     {
-        auto vertexShader = loadShaderBlob(shaderDirectory, "Splat.vs.dxil");
+        auto vertexShader = loadShaderBlob(shaderDirectory, "SplatComposite.vs.dxil");
         if (!vertexShader)
         {
             return vertexShader.error();
         }
-        auto pixelShader = loadShaderBlob(shaderDirectory, "Splat.ps.dxil");
+        auto pixelShader = loadShaderBlob(shaderDirectory, "SplatComposite.ps.dxil");
         if (!pixelShader)
         {
             return pixelShader.error();
         }
 
-        // Buffers only, so root descriptors are enough: no heap, no table.
-        D3D12_ROOT_PARAMETER1 rootParameters[3]{};
-        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rootParameters[0].Descriptor.ShaderRegister = 0;
-        rootParameters[0].Descriptor.Flags =
-            D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+        // One texture, read by Load, so there is no sampler and no constants.
+        D3D12_DESCRIPTOR_RANGE1 range{};
+        range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        range.NumDescriptors = 1;
+        range.BaseShaderRegister = 0;
+        range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
 
-        for (UINT i = 0; i < 2; ++i)
-        {
-            D3D12_ROOT_PARAMETER1& parameter = rootParameters[1 + i];
-            parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-            parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-            parameter.Descriptor.ShaderRegister = i;
-            parameter.Descriptor.Flags =
-                D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
-        }
+        D3D12_ROOT_PARAMETER1 rootParameters[1]{};
+        rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParameters[0].DescriptorTable.NumDescriptorRanges = 1;
+        rootParameters[0].DescriptorTable.pDescriptorRanges = &range;
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
         rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
@@ -1862,15 +2164,16 @@ namespace r4d::d3d12
                                      ? static_cast<const char*>(rootError->GetBufferPointer())
                                      : "(no detail)";
             return hresultError(ErrorCode::ApiCallFailed, hr,
-                                std::format("SerializeVersionedRootSignature (splat): {}",
+                                std::format("SerializeVersionedRootSignature (splat "
+                                            "composite): {}",
                                             detail));
         }
 
         R4D_HR(m_device->CreateRootSignature(0, serialised->GetBufferPointer(),
                                              serialised->GetBufferSize(),
                                              IID_PPV_ARGS(&m_splatRootSignature)),
-               "CreateRootSignature (splat)");
-        m_splatRootSignature->SetName(L"Radiance4D Splat Root Signature");
+               "CreateRootSignature (splat composite)");
+        m_splatRootSignature->SetName(L"Radiance4D Splat Composite Root Signature");
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
         psoDesc.pRootSignature = m_splatRootSignature.Get();
@@ -1879,7 +2182,7 @@ namespace r4d::d3d12
         psoDesc.PS.pShaderBytecode = pixelShader.value().data();
         psoDesc.PS.BytecodeLength = pixelShader.value().size();
 
-        // Premultiplied alpha, which is what the pixel shader emits.
+        // Premultiplied, which is what the rasteriser wrote.
         D3D12_RENDER_TARGET_BLEND_DESC& blend = psoDesc.BlendState.RenderTarget[0];
         blend.BlendEnable = TRUE;
         blend.SrcBlend = D3D12_BLEND_ONE;
@@ -1892,25 +2195,21 @@ namespace r4d::d3d12
 
         psoDesc.SampleMask = UINT_MAX;
         psoDesc.RasterizerState = defaultRasterizerDesc();
-        // The quad comes from SV_VertexID, so its winding is not fixed.
         psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-        // Tested against the mesh depth, never written: the splats order
-        // themselves by the draw order instead.
-        psoDesc.DepthStencilState.DepthEnable = TRUE;
-        psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        // The depth test happened per splat in the rasteriser.
+        psoDesc.DepthStencilState.DepthEnable = FALSE;
         psoDesc.DepthStencilState.StencilEnable = FALSE;
         psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         psoDesc.NumRenderTargets = 1;
         psoDesc.RTVFormats[0] = kBackBufferFormat;
-        psoDesc.DSVFormat = kDepthFormat;
+        psoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
         psoDesc.SampleDesc.Count = 1;
         psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
         R4D_HR(m_device->CreateGraphicsPipelineState(&psoDesc,
                                                      IID_PPV_ARGS(&m_splatPipeline)),
-               "CreateGraphicsPipelineState (splat)");
-        m_splatPipeline->SetName(L"Radiance4D Splat PSO");
+               "CreateGraphicsPipelineState (splat composite)");
+        m_splatPipeline->SetName(L"Radiance4D Splat Composite PSO");
         return Status::Ok();
     }
 
@@ -1974,6 +2273,31 @@ namespace r4d::d3d12
 
         // Allocator reuse is gated on the fence, not the back-buffer index.
         R4D_TRY(waitForFenceValue(frame.fenceValue));
+
+        // The same wait means last time's pair total has landed.
+        if (m_gaussianCount != 0 && !m_pairOverflowReported)
+        {
+            const SortBuffers& sort = m_sortBuffers[frameIndex];
+            if (sort.pairTotalReadback)
+            {
+                std::uint32_t total = 0;
+                void* mapped = nullptr;
+                const D3D12_RANGE range{0, sizeof(total)};
+                if (SUCCEEDED(sort.pairTotalReadback->Map(0, &range, &mapped)))
+                {
+                    std::memcpy(&total, mapped, sizeof(total));
+                    const D3D12_RANGE noWrite{0, 0};
+                    sort.pairTotalReadback->Unmap(0, &noWrite);
+                }
+                if (total > m_pairCapacity)
+                {
+                    m_pairOverflowReported = true;
+                    R4D_WARN("Splats: tile binning needs {} pairs but holds {}; the "
+                             "overflow is dropped and this view is missing splats",
+                             total, m_pairCapacity);
+                }
+            }
+        }
 
         // The wait above also means this slot's timestamps are resolved.
         double gpuMilliseconds = 0.0;
@@ -2131,7 +2455,15 @@ namespace r4d::d3d12
             triangles += primitive.indexCount / 3;
         }
 
-        renderSplats(frameIndex, drawCalls, triangles);
+        if (m_gaussianCount != 0)
+        {
+            // Compute cannot run with the depth buffer bound for writing, and
+            // the rasteriser reads it, so the mesh pass hands it over here.
+            m_commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+            rasteriseSplats(frameIndex);
+            m_commandList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+            renderSplats(drawCalls, triangles);
+        }
 
         renderUi();
 
@@ -2219,6 +2551,7 @@ namespace r4d::d3d12
             m_offscreenTarget.Reset();
             R4D_TRY(createOffscreenTarget(newSize));
             R4D_TRY(createDepthBuffer(newSize));
+            R4D_TRY(createSplatTargets(newSize));
             R4D_INFO("Offscreen target: resized to {}x{}", m_size.x, m_size.y);
             return Status::Ok();
         }
@@ -2245,6 +2578,7 @@ namespace r4d::d3d12
         m_size = newSize;
         R4D_TRY(acquireBackBuffers());
         R4D_TRY(createDepthBuffer(newSize));
+        R4D_TRY(createSplatTargets(newSize));
 
         // Nothing has been drawn into the new buffers yet.
         m_hasRenderedFrame = false;

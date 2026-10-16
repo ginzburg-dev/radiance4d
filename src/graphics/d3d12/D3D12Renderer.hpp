@@ -96,10 +96,11 @@ namespace r4d::d3d12
         Status createShadowMap();
         Status createShadowPipeline(const std::filesystem::path& shaderDirectory);
         Status createSplatPipeline(const std::filesystem::path& shaderDirectory);
+        Status createSplatTargets(UVec2 size);
+        void rasteriseSplats(UINT frameIndex);
         Status createSortPipelines(const std::filesystem::path& shaderDirectory);
         void sortSplats(UINT frameIndex);
-        void renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
-                          std::uint32_t& triangles);
+        void renderSplats(std::uint32_t& drawCalls, std::uint32_t& triangles);
         void renderShadowPass();
         Mat4 lightViewProjection() const;
         Status initialiseUi(void* windowHandle);
@@ -172,6 +173,14 @@ namespace r4d::d3d12
             ScanRows,
             ScanTotals,
             Scatter,
+            BinCount,
+            ScanGroups,
+            ScanGroupSums,
+            ScanAdd,
+            Bin,
+            TileRangesReset,
+            TileRanges,
+            Raster,
             Count
         };
 
@@ -186,14 +195,40 @@ namespace r4d::d3d12
             ComPtr<ID3D12Resource> histogram;
             ComPtr<ID3D12Resource> digitBase;
             // One projection per splat, written by the cull pass and read
-            // by the vertex shader.
+            // by the tile rasteriser.
             ComPtr<ID3D12Resource> projections;
+            // Tile binning: per-splat tile counts, their prefix sum and its
+            // scratch, the (tile, splat) pairs the tile sort ping-pongs, and
+            // one [first, last) range per tile.
+            ComPtr<ID3D12Resource> tileCounts;
+            ComPtr<ID3D12Resource> tileOffsets;
+            ComPtr<ID3D12Resource> groupSums;
+            ComPtr<ID3D12Resource> pairTileA;
+            ComPtr<ID3D12Resource> pairTileB;
+            ComPtr<ID3D12Resource> pairSplatA;
+            ComPtr<ID3D12Resource> pairSplatB;
+            ComPtr<ID3D12Resource> tileRanges;
+            // The pair total the scan produced, copied back so an overflow is
+            // reported rather than silently dropping splats.
+            ComPtr<ID3D12Resource> pairTotalReadback;
         };
         std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
         ComPtr<ID3D12RootSignature> m_sortRootSignature;
         std::array<ComPtr<ID3D12PipelineState>,
                    static_cast<std::size_t>(SortStage::Count)>
             m_sortPipelines{};
+        // The tile rasteriser's output, composited over the mesh image, and
+        // the heap holding its depth SRV, its own UAV and its SRV.
+        ComPtr<ID3D12Resource> m_splatColour;
+        ComPtr<ID3D12DescriptorHeap> m_splatHeap;
+        UINT m_splatDescriptorSize = 0;
+
+        // How many (tile, splat) pairs fit. Fixed at upload, so a frame that
+        // would produce more drops the overflow rather than growing.
+        std::uint32_t m_pairCapacity = 0;
+        std::uint32_t m_pairTileCount = 0;
+        bool m_pairOverflowReported = false;
+
         std::uint32_t m_sortTileCount = 0;
         // m_gaussianCount rounded up to a whole number of tiles.
         std::uint32_t m_sortPaddedCount = 0;

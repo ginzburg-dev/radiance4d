@@ -5,10 +5,9 @@
 
 Radiance4D is a real-time rendering engine for 3D Gaussian splats and triangle meshes in one
 scene. It has native Direct3D 12 and Vulkan backends and compiles one set of HLSL shaders for
-both. A million
-splats draw at 1080p in 9.7 ms, through a compute pipeline that culls, depth sorts, bins into tiles
-and composites front to back. Load a photogrammetry scan, put a model into it, and the two occlude
-each other correctly.
+both. A million splats draw at 1080p in 9.7 ms, through a compute pipeline that culls, depth
+sorts, bins into tiles and composites front to back. Load a photogrammetry scan, put a model into
+it, and the two occlude each other correctly.
 
 ![INRIA train, 1.03M splats, with the per-pass overlay](docs/images/overlay.png)
 

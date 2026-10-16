@@ -1,4 +1,4 @@
-# Radiance4D - Real-Time Render Engine
+# Radiance4D — Real-Time Render Engine
 
 [![Windows build and test](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml/badge.svg?branch=main)](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)

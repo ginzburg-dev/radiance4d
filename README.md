@@ -375,10 +375,12 @@ they start out sorted by depth, and the tile sort is the same stable radix sort 
 alone, which leaves each tile's slice in depth order. Two passes cover a 16-bit tile id. The
 rasteriser walks a slice backwards to composite near to far.
 
-Capacity for the pairs is fixed when a cloud is uploaded, at eight per splat. The frame reads the
-scan's grand total back and reports a view that needed more instead of dropping splats silently:
-`train` at 1080p peaks at 4.55 million pairs against the 8.2 million it holds. Raising the capacity
-to sixteen produces a byte-identical image and costs 2.7 ms, which is what fixes it at eight.
+Capacity for the pairs is fixed when a cloud is uploaded, at eight per splat, which for `train` is
+8,212,224 slots. The frame reads the scan's grand total back and reports a view that needed more
+instead of dropping splats silently. How full that is depends entirely on the camera: the 1280x720
+`--orbit-yaw 150` view above fills 4,547,915 of it, the same view at 1080p fills 7,571,308, and the
+default 1080p framing the benchmark rows use wants 8,902,955 and overflows, so that row is missing
+691k pairs' worth of splats. Sorting the slots nobody filled is addressed below.
 
 This is also where the stored WARP reference moved. The quad pass blended into the 8-bit render
 target once per splat, so hundreds of overlapping splats accumulated hundreds of roundings; the
@@ -422,6 +424,58 @@ without `--no-pass-timings`, interleaved three times per backend, put the whole-
 9.75 ms with the scopes on against 9.74 off on D3D12, and 10.28 against 10.26 on Vulkan: differences
 of 0.02 ms against a run-to-run spread of 0.3 ms. The twelve extra timestamps per frame do not show
 up.
+
+**What bounding the tile sort changed.** The pair buffers are sized for the worst case and no view
+fills them evenly, so the histogram, the row scan, the scatter and the per-tile ranges were all
+walking the whole capacity — sorting a 0xFFFFFFFF filler whose only job was to sort last. The
+binning scan already computes the exact pair total on the GPU, so each of those kernels now stops at
+that total rounded up to a whole 256-thread group and the groups past it retire immediately. The
+window is read on the GPU rather than predicted from the readback the overflow report uses: the pair
+total moves by millions between views, so a dispatch sized from last frame's number would drop
+splats whenever it grew.
+
+At 1280x720 with `--orbit-yaw 150`, where 4.55 of the 8.21 million slots are filled, mean of three
+interleaved `--benchmark 200` runs per build:
+
+| Pass | D3D12 before | D3D12 after | Vulkan before | Vulkan after |
+|---|---|---|---|---|
+| Cull | 0.918 ms | 0.906 ms | 0.748 ms | 0.751 ms |
+| Depth sort | 0.812 ms | 0.817 ms | 0.701 ms | 0.702 ms |
+| Binning | 1.087 ms | 1.019 ms | 0.968 ms | 0.911 ms |
+| Tile sort | 2.401 ms | 1.542 ms | 2.836 ms | 1.980 ms |
+| Rasterise | 2.700 ms | 2.705 ms | 2.567 ms | 2.568 ms |
+| Composite | 0.017 ms | 0.017 ms | 0.016 ms | 0.016 ms |
+| whole-frame pair | 7.941 ms | 7.013 ms | 7.845 ms | 6.938 ms |
+
+The tile sort falls 36% on D3D12 and 30% on Vulkan, and the frame falls 0.93 and 0.91 ms. The four
+passes the change does not touch move by at most 0.012 ms, which is the control: the saving is in
+the pass it was aimed at. Binning drops 0.07 and 0.06 ms as well, because padding the unused slots
+with filler was eight million stores that nothing now reads.
+
+**The published 1080p row does not move, and that is the finding.** Its view wants 8.90 million
+pairs against the 8.21 million the buffers hold, so there are no empty slots in it to skip. Paired
+runs put the tile sort at 3.139 ms before against 3.163 after on D3D12 and 4.456 against 4.486 on
+Vulkan — the extra scalar load per group, inside a run-to-run spread of 0.3 ms. The pass now costs
+what the view needs instead of what the capacity allows, and at the capacity the view is already
+saturated.
+
+That decoupling is what the change actually buys, and it is measurable. Doubling capacity to sixteen
+per splat at the 720p view used to cost 2.08 ms of tile sort on D3D12 (2.401 to 4.477) and 3.56 on
+Vulkan (2.836 to 6.395), because the sort walked all of it. Bounded, the same doubling costs 0.143
+and 0.641 ms (1.542 to 1.685, 1.980 to 2.621) — the remaining cost being the idle groups that still
+launch. On the overflowing 1080p view, sixteen per splat stops dropping splats at all, and costs
+0.39 ms of tile sort instead of 2.10 — 2.784 to 3.176 bounded, against 2.830 to 4.934 unbounded.
+Capacity was left at eight here because sixteen doubles the pair buffers and changes that 1080p
+image; the point is that it is now a memory decision rather than a frame-time one.
+
+Indirect dispatch was considered and not used. The groups past the window still launch before they
+retire, and that is what it would remove — the residual the capacity-doubling figures above measure
+directly: 0.14 ms on D3D12 and 0.64 on Vulkan for 32k extra idle groups across five dispatches. It
+would not remove the clamp, because the row scan and the scatter index the histogram at the full
+stride and need the live tile count inside the shader either way. Against that residual it costs an
+argument buffer, a kernel to fill it and a root-signature change on both backends, and it is
+unverified on the pinned WARP that `SplatRender_test` runs on, where `ExecuteIndirect` with a draw
+argument was already found to draw nothing. Those numbers are what say when to revisit it.
 
 A sampling profiler is still outstanding. This attributes GPU time per pass, not per instruction,
 and it cannot say why a pass costs what it does.

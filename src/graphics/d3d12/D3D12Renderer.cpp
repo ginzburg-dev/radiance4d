@@ -497,8 +497,8 @@ namespace r4d::d3d12
         else
         {
             ImGuiIO& io = ImGui::GetIO();
-            io.DisplaySize = ImVec2(static_cast<float>(m_size.x),
-                                    static_cast<float>(m_size.y));
+            io.DisplaySize =
+                ImVec2(static_cast<float>(m_size.x), static_cast<float>(m_size.y));
             io.DeltaTime = 1.0f / 60.0f;
         }
         ImGui::NewFrame();

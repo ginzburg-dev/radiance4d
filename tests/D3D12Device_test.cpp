@@ -91,8 +91,8 @@ TEST_F(WarpDevice, ResizesWithoutValidationErrors)
     ASSERT_TRUE(gpu.renderFrame().ok());
 
     // Odd sizes catch assumptions about dimensions and row padding.
-    for (const r4d::UVec2 size : {r4d::UVec2{201, 97}, r4d::UVec2{640, 360},
-                                  r4d::UVec2{63, 129}})
+    for (const r4d::UVec2 size :
+         {r4d::UVec2{201, 97}, r4d::UVec2{640, 360}, r4d::UVec2{63, 129}})
     {
         ASSERT_TRUE(gpu.resize(size).ok()) << size.x << "x" << size.y;
         ASSERT_TRUE(gpu.renderFrame().ok()) << size.x << "x" << size.y;

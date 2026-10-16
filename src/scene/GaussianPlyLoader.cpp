@@ -42,13 +42,13 @@ namespace r4d
             switch (type)
             {
                 case PlyType::Int8:
-                case PlyType::UInt8:    return 1;
+                case PlyType::UInt8: return 1;
                 case PlyType::Int16:
-                case PlyType::UInt16:   return 2;
+                case PlyType::UInt16: return 2;
                 case PlyType::Int32:
                 case PlyType::UInt32:
-                case PlyType::Float32:  return 4;
-                case PlyType::Float64:  return 8;
+                case PlyType::Float32: return 4;
+                case PlyType::Float64: return 8;
             }
             return 0;
         }
@@ -56,14 +56,46 @@ namespace r4d
         bool parsePlyType(std::string_view text, PlyType& out)
         {
             // Both the short and the sized spellings appear in the wild.
-            if (text == "float" || text == "float32")   { out = PlyType::Float32; return true; }
-            if (text == "double" || text == "float64")  { out = PlyType::Float64; return true; }
-            if (text == "char" || text == "int8")       { out = PlyType::Int8;    return true; }
-            if (text == "uchar" || text == "uint8")     { out = PlyType::UInt8;   return true; }
-            if (text == "short" || text == "int16")     { out = PlyType::Int16;   return true; }
-            if (text == "ushort" || text == "uint16")   { out = PlyType::UInt16;  return true; }
-            if (text == "int" || text == "int32")       { out = PlyType::Int32;   return true; }
-            if (text == "uint" || text == "uint32")     { out = PlyType::UInt32;  return true; }
+            if (text == "float" || text == "float32")
+            {
+                out = PlyType::Float32;
+                return true;
+            }
+            if (text == "double" || text == "float64")
+            {
+                out = PlyType::Float64;
+                return true;
+            }
+            if (text == "char" || text == "int8")
+            {
+                out = PlyType::Int8;
+                return true;
+            }
+            if (text == "uchar" || text == "uint8")
+            {
+                out = PlyType::UInt8;
+                return true;
+            }
+            if (text == "short" || text == "int16")
+            {
+                out = PlyType::Int16;
+                return true;
+            }
+            if (text == "ushort" || text == "uint16")
+            {
+                out = PlyType::UInt16;
+                return true;
+            }
+            if (text == "int" || text == "int32")
+            {
+                out = PlyType::Int32;
+                return true;
+            }
+            if (text == "uint" || text == "uint32")
+            {
+                out = PlyType::UInt32;
+                return true;
+            }
             return false;
         }
 
@@ -136,9 +168,11 @@ namespace r4d
             std::size_t i = 0;
             while (i < line.size())
             {
-                while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+                while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+                    ++i;
                 const std::size_t start = i;
-                while (i < line.size() && line[i] != ' ' && line[i] != '\t') ++i;
+                while (i < line.size() && line[i] != ' ' && line[i] != '\t')
+                    ++i;
                 if (i > start)
                 {
                     tokens.emplace_back(line, start, i - start);
@@ -152,7 +186,8 @@ namespace r4d
         bool readHeaderLine(std::istream& stream, std::string& line)
         {
             line.clear();
-            for (int c = stream.get(); c != std::char_traits<char>::eof(); c = stream.get())
+            for (int c = stream.get(); c != std::char_traits<char>::eof();
+                 c = stream.get())
             {
                 if (c == '\n')
                 {
@@ -165,7 +200,7 @@ namespace r4d
                 line.push_back(static_cast<char>(c));
                 if (line.size() > 1024)
                 {
-                    return false;   // not a .ply header
+                    return false; // not a .ply header
                 }
             }
             return false;
@@ -185,9 +220,9 @@ namespace r4d
 
             if (!readHeaderLine(stream, line) || line != "ply")
             {
-                return makeError(ErrorCode::InvalidArgument,
-                                 std::format("'{}' does not start with a ply magic line",
-                                             pathText));
+                return makeError(
+                    ErrorCode::InvalidArgument,
+                    std::format("'{}' does not start with a ply magic line", pathText));
             }
 
             bool haveFormat = false;
@@ -198,8 +233,9 @@ namespace r4d
             {
                 if (!readHeaderLine(stream, line))
                 {
-                    return makeError(ErrorCode::InvalidArgument,
-                                     std::format("'{}' ends before end_header", pathText));
+                    return makeError(
+                        ErrorCode::InvalidArgument,
+                        std::format("'{}' ends before end_header", pathText));
                 }
 
                 const std::vector<std::string> tokens = tokenise(line);
@@ -217,17 +253,16 @@ namespace r4d
                 {
                     if (tokens.size() < 2)
                     {
-                        return makeError(ErrorCode::InvalidArgument,
-                                         std::format("'{}' has a malformed format line",
-                                                     pathText));
+                        return makeError(
+                            ErrorCode::InvalidArgument,
+                            std::format("'{}' has a malformed format line", pathText));
                     }
                     if (tokens[1] != "binary_little_endian")
                     {
-                        return makeError(
-                            ErrorCode::UnsupportedFeature,
-                            std::format("'{}' is ply format '{}'; only "
-                                        "binary_little_endian is supported",
-                                        pathText, tokens[1]));
+                        return makeError(ErrorCode::UnsupportedFeature,
+                                         std::format("'{}' is ply format '{}'; only "
+                                                     "binary_little_endian is supported",
+                                                     pathText, tokens[1]));
                     }
                     haveFormat = true;
                     continue;
@@ -237,9 +272,9 @@ namespace r4d
                 {
                     if (tokens.size() < 3)
                     {
-                        return makeError(ErrorCode::InvalidArgument,
-                                         std::format("'{}' has a malformed element line",
-                                                     pathText));
+                        return makeError(
+                            ErrorCode::InvalidArgument,
+                            std::format("'{}' has a malformed element line", pathText));
                     }
                     inVertexElement = tokens[1] == "vertex";
                     if (!inVertexElement)
@@ -255,8 +290,9 @@ namespace r4d
                     }
                     if (haveVertexElement)
                     {
-                        return makeError(ErrorCode::InvalidArgument,
-                                         std::format("'{}' declares vertex twice", pathText));
+                        return makeError(
+                            ErrorCode::InvalidArgument,
+                            std::format("'{}' declares vertex twice", pathText));
                     }
                     haveVertexElement = true;
 
@@ -267,9 +303,10 @@ namespace r4d
                     }
                     catch (const std::exception&)
                     {
-                        return makeError(ErrorCode::InvalidArgument,
-                                         std::format("'{}' has a non-numeric vertex count '{}'",
-                                                     pathText, tokens[2]));
+                        return makeError(
+                            ErrorCode::InvalidArgument,
+                            std::format("'{}' has a non-numeric vertex count '{}'",
+                                        pathText, tokens[2]));
                     }
                     header.vertexCount = static_cast<std::size_t>(count);
                     continue;
@@ -279,15 +316,16 @@ namespace r4d
                 {
                     if (!inVertexElement)
                     {
-                        return makeError(ErrorCode::InvalidArgument,
-                                         std::format("'{}' has a property outside any element",
-                                                     pathText));
+                        return makeError(
+                            ErrorCode::InvalidArgument,
+                            std::format("'{}' has a property outside any element",
+                                        pathText));
                     }
                     if (tokens.size() < 3)
                     {
-                        return makeError(ErrorCode::InvalidArgument,
-                                         std::format("'{}' has a malformed property line",
-                                                     pathText));
+                        return makeError(
+                            ErrorCode::InvalidArgument,
+                            std::format("'{}' has a malformed property line", pathText));
                     }
                     if (tokens[1] == "list")
                     {
@@ -301,9 +339,10 @@ namespace r4d
                     PlyProperty property;
                     if (!parsePlyType(tokens[1], property.type))
                     {
-                        return makeError(ErrorCode::UnsupportedFeature,
-                                         std::format("'{}' uses unknown property type '{}'",
-                                                     pathText, tokens[1]));
+                        return makeError(
+                            ErrorCode::UnsupportedFeature,
+                            std::format("'{}' uses unknown property type '{}'", pathText,
+                                        tokens[1]));
                     }
                     property.offset = header.stride;
                     header.stride += byteSize(property.type);
@@ -343,7 +382,7 @@ namespace r4d
             PlyProperty rotation[4];
             PlyProperty opacity;
             PlyProperty dc[3];
-            std::vector<PlyProperty> rest;   // channel-major, as the file stores it
+            std::vector<PlyProperty> rest; // channel-major, as the file stores it
             int degree = 0;
             int coefficients = 1;
         };
@@ -352,13 +391,14 @@ namespace r4d
         {
             Fields fields;
 
-            const auto require = [&](const std::string& name,
-                                     PlyProperty& out) -> Status {
+            const auto require = [&](const std::string& name, PlyProperty& out) -> Status
+            {
                 const auto found = header.properties.find(name);
                 if (found == header.properties.end())
                 {
-                    return makeError(ErrorCode::InvalidArgument,
-                                     std::format("'{}' has no '{}' property", pathText, name));
+                    return makeError(
+                        ErrorCode::InvalidArgument,
+                        std::format("'{}' has no '{}' property", pathText, name));
                 }
                 out = found->second;
                 return Status::Ok();
@@ -403,8 +443,8 @@ namespace r4d
 
             switch (contiguous)
             {
-                case 0:  fields.degree = 0; break;
-                case 9:  fields.degree = 1; break;
+                case 0: fields.degree = 0; break;
+                case 9: fields.degree = 1; break;
                 case 24: fields.degree = 2; break;
                 case 45: fields.degree = 3; break;
                 default:
@@ -455,7 +495,7 @@ namespace r4d
             {
                 if (band >= kShCoefficients)
                 {
-                    break;      // a lower runtime degree simply has fewer of them
+                    break; // a lower runtime degree simply has fewer of them
                 }
                 for (int c = 0; c < 3; ++c)
                 {
@@ -566,12 +606,14 @@ namespace r4d
         R4D_INFO("Gaussians: {} splats from '{}', SH degree {} in the file ({:.1f} MiB "
                  "on the GPU)",
                  cloud.count(), pathText, fields.value().degree,
-                 static_cast<double>(cloud.count() * sizeof(Gaussian)) / (1024.0 * 1024.0));
+                 static_cast<double>(cloud.count() * sizeof(Gaussian)) /
+                     (1024.0 * 1024.0));
         if (fields.value().degree != kShDegree)
         {
-            R4D_WARN("Gaussians: the file carries SH degree {} and the runtime degree {}; "
-                     "the missing bands are zero",
-                     fields.value().degree, kShDegree);
+            R4D_WARN(
+                "Gaussians: the file carries SH degree {} and the runtime degree {}; "
+                "the missing bands are zero",
+                fields.value().degree, kShDegree);
         }
         return cloud;
     }

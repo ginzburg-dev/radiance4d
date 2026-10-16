@@ -26,20 +26,24 @@ namespace r4d::vulkan
 
 } // namespace r4d::vulkan
 
-#define R4D_VK(expr, what)                                                       \
-    do {                                                                         \
-        const VkResult _r4d_vk = (expr);                                         \
-        if (_r4d_vk != VK_SUCCESS) {                                             \
-            return ::r4d::vulkan::vulkanError(::r4d::ErrorCode::ApiCallFailed,   \
-                                              _r4d_vk, (what));                  \
-        }                                                                        \
+#define R4D_VK(expr, what)                                                               \
+    do                                                                                   \
+    {                                                                                    \
+        const VkResult _r4d_vk = (expr);                                                 \
+        if (_r4d_vk != VK_SUCCESS)                                                       \
+        {                                                                                \
+            return ::r4d::vulkan::vulkanError(::r4d::ErrorCode::ApiCallFailed, _r4d_vk,  \
+                                              (what));                                   \
+        }                                                                                \
     } while (false)
 
-#define R4D_VK_DEVICE(expr, what)                                                     \
-    do {                                                                              \
-        const VkResult _r4d_vk = (expr);                                              \
-        if (_r4d_vk != VK_SUCCESS) {                                                  \
-            return ::r4d::vulkan::vulkanError(::r4d::ErrorCode::DeviceCreationFailed, \
-                                              _r4d_vk, (what));                       \
-        }                                                                             \
+#define R4D_VK_DEVICE(expr, what)                                                        \
+    do                                                                                   \
+    {                                                                                    \
+        const VkResult _r4d_vk = (expr);                                                 \
+        if (_r4d_vk != VK_SUCCESS)                                                       \
+        {                                                                                \
+            return ::r4d::vulkan::vulkanError(::r4d::ErrorCode::DeviceCreationFailed,    \
+                                              _r4d_vk, (what));                          \
+        }                                                                                \
     } while (false)

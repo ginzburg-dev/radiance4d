@@ -1,0 +1,19 @@
+# Matches the existing sources; `make format` must leave a clean tree.
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 90
+NamespaceIndentation: All
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+PointerAlignment: Left
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+SortIncludes: false
+IndentCaseLabels: true
+AccessModifierOffset: -4
+SpaceAfterTemplateKeyword: false
+AlwaysBreakTemplateDeclarations: Yes

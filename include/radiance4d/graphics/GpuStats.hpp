@@ -30,20 +30,13 @@ namespace r4d
     {
         switch (pass)
         {
-        case GpuPass::SplatCull:
-            return "Cull";
-        case GpuPass::SplatDepthSort:
-            return "Depth sort";
-        case GpuPass::SplatBinning:
-            return "Binning";
-        case GpuPass::SplatTileSort:
-            return "Tile sort";
-        case GpuPass::SplatRaster:
-            return "Rasterise";
-        case GpuPass::SplatComposite:
-            return "Composite";
-        case GpuPass::Count:
-            break;
+            case GpuPass::SplatCull: return "Cull";
+            case GpuPass::SplatDepthSort: return "Depth sort";
+            case GpuPass::SplatBinning: return "Binning";
+            case GpuPass::SplatTileSort: return "Tile sort";
+            case GpuPass::SplatRaster: return "Rasterise";
+            case GpuPass::SplatComposite: return "Composite";
+            case GpuPass::Count: break;
         }
         return "unknown";
     }

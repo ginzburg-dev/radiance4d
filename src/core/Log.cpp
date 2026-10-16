@@ -24,7 +24,8 @@ namespace r4d
         }
     }
 
-    void Logger::init(LogLevel minLevel, bool toConsole, const std::filesystem::path& logFile)
+    void Logger::init(LogLevel minLevel, bool toConsole,
+                      const std::filesystem::path& logFile)
     {
         std::lock_guard<std::mutex> lock{m_mutex};
         m_minLevel = minLevel;
@@ -47,7 +48,8 @@ namespace r4d
         const auto now = std::chrono::system_clock::now();
         const auto t = std::chrono::system_clock::to_time_t(now);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now.time_since_epoch()) % 1000;
+                            now.time_since_epoch()) %
+                        1000;
         std::tm tm{};
         localtime_s(&tm, &t);
         char buf[32];

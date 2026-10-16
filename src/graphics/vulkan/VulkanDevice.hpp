@@ -21,7 +21,8 @@ namespace r4d::vulkan
     public:
         std::uint64_t errorCount() const { return m_errorCount.load(); }
         std::uint64_t warningCount() const { return m_warningCount.load(); }
-        void onMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity, const char* message);
+        void onMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                       const char* message);
 
     private:
         std::atomic<std::uint64_t> m_errorCount{0};

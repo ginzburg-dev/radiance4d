@@ -18,8 +18,7 @@ namespace r4d
         static LRESULT dispatch(Window* window, UINT msg, WPARAM wparam, LPARAM lparam)
         {
             return static_cast<LRESULT>(
-                window->handleMessage(msg,
-                                      static_cast<unsigned long long>(wparam),
+                window->handleMessage(msg, static_cast<unsigned long long>(wparam),
                                       static_cast<long long>(lparam)));
         }
     };
@@ -73,7 +72,8 @@ namespace
 
     bool registerWindowClass()
     {
-        static const bool registered = []() {
+        static const bool registered = []()
+        {
             WNDCLASSEXW wc{};
             wc.cbSize = sizeof(wc);
             wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
@@ -92,21 +92,21 @@ namespace
     {
         switch (vk)
         {
-            case VK_ESCAPE:  outKey = r4d::Key::Escape;  return true;
-            case VK_F1:      outKey = r4d::Key::F1;      return true;
-            case VK_F2:      outKey = r4d::Key::F2;      return true;
-            case VK_F3:      outKey = r4d::Key::F3;      return true;
-            case VK_F4:      outKey = r4d::Key::F4;      return true;
-            case 'W':        outKey = r4d::Key::W;       return true;
-            case 'A':        outKey = r4d::Key::A;       return true;
-            case 'S':        outKey = r4d::Key::S;       return true;
-            case 'D':        outKey = r4d::Key::D;       return true;
-            case 'Q':        outKey = r4d::Key::Q;       return true;
-            case 'E':        outKey = r4d::Key::E;       return true;
-            case VK_SPACE:   outKey = r4d::Key::Space;   return true;
-            case VK_SHIFT:   outKey = r4d::Key::Shift;   return true;
+            case VK_ESCAPE: outKey = r4d::Key::Escape; return true;
+            case VK_F1: outKey = r4d::Key::F1; return true;
+            case VK_F2: outKey = r4d::Key::F2; return true;
+            case VK_F3: outKey = r4d::Key::F3; return true;
+            case VK_F4: outKey = r4d::Key::F4; return true;
+            case 'W': outKey = r4d::Key::W; return true;
+            case 'A': outKey = r4d::Key::A; return true;
+            case 'S': outKey = r4d::Key::S; return true;
+            case 'D': outKey = r4d::Key::D; return true;
+            case 'Q': outKey = r4d::Key::Q; return true;
+            case 'E': outKey = r4d::Key::E; return true;
+            case VK_SPACE: outKey = r4d::Key::Space; return true;
+            case VK_SHIFT: outKey = r4d::Key::Shift; return true;
             case VK_CONTROL: outKey = r4d::Key::Control; return true;
-            default:         return false;
+            default: return false;
         }
     }
 } // namespace
@@ -118,10 +118,12 @@ namespace r4d
     {
         // Must precede the first window or the client size gets DPI-scaled.
         static const bool dpiConfigured =
-            ::SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != FALSE;
+            ::SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) !=
+            FALSE;
         if (!dpiConfigured)
         {
-            R4D_WARN("Window: per-monitor DPI awareness v2 was refused; sizes may be scaled");
+            R4D_WARN(
+                "Window: per-monitor DPI awareness v2 was refused; sizes may be scaled");
         }
 
         if (!registerWindowClass())
@@ -139,10 +141,9 @@ namespace r4d
         const std::wstring title = utf8ToWide(desc.title);
 
         const HWND hwnd = ::CreateWindowExW(
-            0, kWindowClassName, title.c_str(), style,
-            CW_USEDEFAULT, CW_USEDEFAULT,
-            rect.right - rect.left, rect.bottom - rect.top,
-            nullptr, nullptr, ::GetModuleHandleW(nullptr), window.get());
+            0, kWindowClassName, title.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT,
+            rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr,
+            ::GetModuleHandleW(nullptr), window.get());
 
         if (hwnd == nullptr)
         {
@@ -222,12 +223,13 @@ namespace r4d
         const HWND hwnd = static_cast<HWND>(m_hwnd);
         const LONG style = ::GetWindowLongW(hwnd, GWL_STYLE);
         ::AdjustWindowRect(&rect, static_cast<DWORD>(style), FALSE);
-        ::SetWindowPos(hwnd, nullptr, 0, 0,
-                       rect.right - rect.left, rect.bottom - rect.top,
+        ::SetWindowPos(hwnd, nullptr, 0, 0, rect.right - rect.left,
+                       rect.bottom - rect.top,
                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    long long Window::handleMessage(unsigned msg, unsigned long long wparam, long long lparam)
+    long long Window::handleMessage(unsigned msg, unsigned long long wparam,
+                                    long long lparam)
     {
         const HWND hwnd = static_cast<HWND>(m_hwnd);
 
@@ -292,7 +294,8 @@ namespace r4d
             {
                 const int x = static_cast<short>(LOWORD(lparam));
                 const int y = static_cast<short>(HIWORD(lparam));
-                m_input.setMousePosition(Vec2{static_cast<float>(x), static_cast<float>(y)});
+                m_input.setMousePosition(
+                    Vec2{static_cast<float>(x), static_cast<float>(y)});
                 return 0;
             }
 
@@ -302,9 +305,10 @@ namespace r4d
             {
                 // Keep receiving movement while a drag leaves the client area.
                 ::SetCapture(hwnd);
-                const MouseButton button = (msg == WM_LBUTTONDOWN)   ? MouseButton::Left
-                                           : (msg == WM_RBUTTONDOWN) ? MouseButton::Right
-                                                                     : MouseButton::Middle;
+                const MouseButton button = (msg == WM_LBUTTONDOWN) ? MouseButton::Left
+                                           : (msg == WM_RBUTTONDOWN)
+                                               ? MouseButton::Right
+                                               : MouseButton::Middle;
                 m_input.setMouseDown(button, true);
                 return 0;
             }
@@ -337,15 +341,13 @@ namespace r4d
                 return 0;
 
             // Stop the beep on Alt and F10.
-            case WM_SYSCHAR:
-                return 0;
+            case WM_SYSCHAR: return 0;
 
-            default:
-                break;
+            default: break;
         }
 
-        return ::DefWindowProcW(hwnd, static_cast<UINT>(msg),
-                                static_cast<WPARAM>(wparam), static_cast<LPARAM>(lparam));
+        return ::DefWindowProcW(hwnd, static_cast<UINT>(msg), static_cast<WPARAM>(wparam),
+                                static_cast<LPARAM>(lparam));
     }
 
 } // namespace r4d

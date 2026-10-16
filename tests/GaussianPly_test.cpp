@@ -36,9 +36,8 @@ namespace
 
     void appendScalar(std::string& body, const Field& field)
     {
-        const auto append = [&body](const void* bytes, std::size_t size) {
-            body.append(static_cast<const char*>(bytes), size);
-        };
+        const auto append = [&body](const void* bytes, std::size_t size)
+        { body.append(static_cast<const char*>(bytes), size); };
         if (field.type == "float")
         {
             const auto value = static_cast<float>(field.value);
@@ -114,21 +113,25 @@ namespace
     struct RawSplat
     {
         double position[3]{1.5, -2.25, 0.75};
-        double logScale[3]{-1.3862943611, 0.0, 1.0986122887};   // exp: 0.25, 1, 3
-        double rotation[4]{1.0, 2.0, 3.0, 4.0};                 // wxyz, unnormalised
-        double opacity = 2.0;                                   // sigmoid: 0.8807971
+        double logScale[3]{-1.3862943611, 0.0, 1.0986122887}; // exp: 0.25, 1, 3
+        double rotation[4]{1.0, 2.0, 3.0, 4.0};               // wxyz, unnormalised
+        double opacity = 2.0;                                 // sigmoid: 0.8807971
         double dc[3]{0.4, -0.2, 0.9};
     };
 
     // Identifies both the channel and the band a coefficient must end up in, so
     // a transposed or shifted SH copy cannot pass.
-    double restValue(int channel, int band) { return 100.0 * channel + band + 1.0; }
+    double restValue(int channel, int band)
+    {
+        return 100.0 * channel + band + 1.0;
+    }
 
     // The loader mirrors the file's y, and a basis function odd in y changes
     // sign with it. These six are the odd ones in the Splat.vs.hlsl ordering.
     bool bandIsOddInY(int band)
     {
-        return band == 1 || band == 4 || band == 5 || band == 9 || band == 10 || band == 11;
+        return band == 1 || band == 4 || band == 5 || band == 9 || band == 10 ||
+               band == 11;
     }
 
     // What f_rest_(channel * perChannel + band - 1) must read back as.
@@ -138,7 +141,10 @@ namespace
         return bandIsOddInY(band) ? -value : value;
     }
 
-    int coefficientsFor(int degree) { return (degree + 1) * (degree + 1); }
+    int coefficientsFor(int degree)
+    {
+        return (degree + 1) * (degree + 1);
+    }
 
     // The basis evaluateSh in Splat.vs.hlsl uses, duplicated so a test can state
     // what the frame change must preserve -- the colour along a direction --
@@ -146,10 +152,10 @@ namespace
     // ever changes, this has to move with it.
     r4d::Vec3 evaluateSh(const float* sh, r4d::Vec3 d)
     {
-        static_assert(r4d::kShCoefficients == 16, "this basis is written out to degree 3");
-        const auto band = [sh](int k) {
-            return r4d::Vec3{sh[k * 3], sh[k * 3 + 1], sh[k * 3 + 2]};
-        };
+        static_assert(r4d::kShCoefficients == 16,
+                      "this basis is written out to degree 3");
+        const auto band = [sh](int k)
+        { return r4d::Vec3{sh[k * 3], sh[k * 3 + 1], sh[k * 3 + 2]}; };
         const float x = d.x, y = d.y, z = d.z;
         const float xx = x * x, yy = y * y, zz = z * z;
         const float xy = x * y, yz = y * z, xz = x * z;
@@ -164,7 +170,8 @@ namespace
         colour += -0.5900435899266435f * y * (3.0f * xx - yy) * band(9);
         colour += 2.890611442640554f * xy * z * band(10);
         colour += -0.4570457994644658f * y * (4.0f * zz - xx - yy) * band(11);
-        colour += 0.3731763325901154f * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * band(12);
+        colour +=
+            0.3731763325901154f * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * band(12);
         colour += -0.4570457994644658f * x * (4.0f * zz - xx - yy) * band(13);
         colour += 1.445305721320277f * z * (xx - yy) * band(14);
         colour += -0.5900435899266435f * x * (xx - 3.0f * yy) * band(15);
@@ -255,7 +262,7 @@ TEST_F(GaussianPly, ConvertsTheStoredActivationsOnLoad)
     const r4d::Gaussian& g = loaded.value().gaussians.front();
 
     EXPECT_NEAR(g.position.x, 1.5f, kTolerance);
-    EXPECT_NEAR(g.position.y, 2.25f, kTolerance);   // mirrored out of COLMAP's frame
+    EXPECT_NEAR(g.position.y, 2.25f, kTolerance); // mirrored out of COLMAP's frame
     EXPECT_NEAR(g.position.z, 0.75f, kTolerance);
 
     // Log-scales are exponentiated, not passed through.
@@ -281,7 +288,7 @@ TEST_F(GaussianPly, QuaternionIsNormalisedAndReadAsWxyz)
     ASSERT_TRUE(loaded.ok()) << loaded.error().ToString();
     const r4d::Quat& q = loaded.value().gaussians.front().rotation;
 
-    const float norm = std::sqrt(1.0f + 4.0f + 9.0f + 16.0f);   // sqrt(30)
+    const float norm = std::sqrt(1.0f + 4.0f + 9.0f + 16.0f); // sqrt(30)
     EXPECT_NEAR(q.w, 1.0f / norm, kTolerance);
     EXPECT_NEAR(q.x, -2.0f / norm, kTolerance);
     EXPECT_NEAR(q.y, 3.0f / norm, kTolerance);
@@ -313,8 +320,8 @@ TEST_F(GaussianPly, TransposesTheChannelMajorShIntoCoefficientMajor)
     {
         for (int c = 0; c < 3; ++c)
         {
-            EXPECT_NEAR(g.sh[band * 3 + c], static_cast<float>(mirroredRestValue(c, band)),
-                        kTolerance)
+            EXPECT_NEAR(g.sh[band * 3 + c],
+                        static_cast<float>(mirroredRestValue(c, band)), kTolerance)
                 << "band " << band << " channel " << c;
         }
     }
@@ -332,9 +339,9 @@ TEST_F(GaussianPly, MirrorsTheRotationSoTheCovarianceIsReflected)
     ASSERT_TRUE(loaded.ok()) << loaded.error().ToString();
     const r4d::Gaussian& g = loaded.value().gaussians.front();
 
-    const r4d::Quat fileRotation = glm::normalize(
-        r4d::Quat{static_cast<float>(raw.rotation[0]), static_cast<float>(raw.rotation[1]),
-                  static_cast<float>(raw.rotation[2]), static_cast<float>(raw.rotation[3])});
+    const r4d::Quat fileRotation = glm::normalize(r4d::Quat{
+        static_cast<float>(raw.rotation[0]), static_cast<float>(raw.rotation[1]),
+        static_cast<float>(raw.rotation[2]), static_cast<float>(raw.rotation[3])});
     const r4d::Mat3 mirror{1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     const r4d::Mat3 want = mirror * glm::mat3_cast(fileRotation) * mirror;
     const r4d::Mat3 got = glm::mat3_cast(g.rotation);
@@ -377,8 +384,10 @@ TEST_F(GaussianPly, MirroredShShowsTheSameColourAlongTheMirroredDirection)
     }
 
     // Deliberately off-axis, so no basis function sits at a zero of its own.
-    const r4d::Vec3 directions[]{{0.3f, 0.5f, -0.81f}, {-0.6f, -0.2f, 0.77f},
-                                 {0.48f, -0.73f, 0.49f}, {-0.35f, 0.62f, 0.70f}};
+    const r4d::Vec3 directions[]{{0.3f, 0.5f, -0.81f},
+                                 {-0.6f, -0.2f, 0.77f},
+                                 {0.48f, -0.73f, 0.49f},
+                                 {-0.35f, 0.62f, 0.70f}};
     for (const r4d::Vec3& raw3 : directions)
     {
         const r4d::Vec3 d = glm::normalize(raw3);
@@ -390,7 +399,8 @@ TEST_F(GaussianPly, MirroredShShowsTheSameColourAlongTheMirroredDirection)
         for (int c = 0; c < 3; ++c)
         {
             EXPECT_NEAR(got[c], want[c], 1e-3f * (1.0f + std::abs(want[c])))
-                << "direction (" << d.x << ", " << d.y << ", " << d.z << ") channel " << c;
+                << "direction (" << d.x << ", " << d.y << ", " << d.z << ") channel "
+                << c;
         }
     }
 }
@@ -465,8 +475,8 @@ TEST_F(GaussianPly, ALowerDegreeFileLeavesTheMissingBandsZero)
     {
         for (int c = 0; c < 3; ++c)
         {
-            EXPECT_NEAR(g.sh[band * 3 + c], static_cast<float>(mirroredRestValue(c, band)),
-                        kTolerance);
+            EXPECT_NEAR(g.sh[band * 3 + c],
+                        static_cast<float>(mirroredRestValue(c, band)), kTolerance);
         }
     }
     for (int i = 4 * 3; i < r4d::kShCoefficients * 3; ++i)
@@ -583,7 +593,8 @@ TEST_F(GaussianPly, RejectsATruncatedBody)
 TEST_F(GaussianPly, RejectsAMissingRequiredProperty)
 {
     const RawSplat raw;
-    writePly(path("no_opacity.ply"), {withoutProperty(canonicalVertex(raw, 3), "opacity")});
+    writePly(path("no_opacity.ply"),
+             {withoutProperty(canonicalVertex(raw, 3), "opacity")});
     writePly(path("no_rot_3.ply"), {withoutProperty(canonicalVertex(raw, 3), "rot_3")});
 
     auto missingOpacity = r4d::loadGaussianPly(path("no_opacity.ply"));

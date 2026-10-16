@@ -60,7 +60,8 @@ namespace
         }
         else
         {
-            const r4d::GaussianCloud cloud = r4d::makeProceduralGaussianCloud(splats, 1337);
+            const r4d::GaussianCloud cloud =
+                r4d::makeProceduralGaussianCloud(splats, 1337);
             if (auto status = gpu.uploadGaussians(cloud); !status)
             {
                 return status.error();
@@ -71,8 +72,8 @@ namespace
         r4d::Camera camera;
         camera.setAspect(static_cast<float>(kWidth) / static_cast<float>(kHeight));
         camera.focusOn(bounds.centre(), bounds.radius());
-        gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(),
-                                        camera.position()});
+        gpu.setCamera(
+            r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
 
         for (int i = 0; i < kFrames; ++i)
         {
@@ -113,16 +114,16 @@ TEST_F(BackendParity, VulkanMatchesD3D12WithinTolerance)
     auto d3d12 = renderWith(r4d::BackendType::D3D12);
     ASSERT_TRUE(d3d12.ok()) << d3d12.error().ToString();
 
-    const auto difference = r4d::testing::compareImages(vulkan.value(), d3d12.value(),
-                                                        kPerPixelTolerance);
+    const auto difference =
+        r4d::testing::compareImages(vulkan.value(), d3d12.value(), kPerPixelTolerance);
     ASSERT_TRUE(difference.comparable) << difference.message;
 
     if (difference.maxChannelDelta > kMaxChannelDelta || difference.rmse > kMaxRmse ||
         difference.differingFraction() > kMaxDifferingFraction)
     {
-        r4d::testing::writeFailureArtefacts(
-            std::filesystem::path{R4D_TEST_DATA_DIR} / "backend_parity.png", vulkan.value(),
-            d3d12.value());
+        r4d::testing::writeFailureArtefacts(std::filesystem::path{R4D_TEST_DATA_DIR} /
+                                                "backend_parity.png",
+                                            vulkan.value(), d3d12.value());
         FAIL() << "the backends diverged: " << difference.message;
     }
 
@@ -145,16 +146,16 @@ TEST_F(BackendParity, SplatsMatchD3D12WithinTolerance)
     auto d3d12 = renderWith(r4d::BackendType::D3D12, kSplats);
     ASSERT_TRUE(d3d12.ok()) << d3d12.error().ToString();
 
-    const auto difference = r4d::testing::compareImages(vulkan.value(), d3d12.value(),
-                                                        kPerPixelTolerance);
+    const auto difference =
+        r4d::testing::compareImages(vulkan.value(), d3d12.value(), kPerPixelTolerance);
     ASSERT_TRUE(difference.comparable) << difference.message;
 
     if (difference.maxChannelDelta > kMaxChannelDelta || difference.rmse > kMaxRmse ||
         difference.differingFraction() > kMaxDifferingFraction)
     {
-        r4d::testing::writeFailureArtefacts(
-            std::filesystem::path{R4D_TEST_DATA_DIR} / "backend_parity_splats.png",
-            vulkan.value(), d3d12.value());
+        r4d::testing::writeFailureArtefacts(std::filesystem::path{R4D_TEST_DATA_DIR} /
+                                                "backend_parity_splats.png",
+                                            vulkan.value(), d3d12.value());
         FAIL() << "the splat pass diverged between the backends: " << difference.message;
     }
 

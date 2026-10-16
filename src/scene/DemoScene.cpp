@@ -9,8 +9,8 @@ namespace r4d
 {
     namespace
     {
-        void addSphere(Model& model, Vec3 centre, float radius, std::uint32_t materialIndex,
-                       int segments, int rings)
+        void addSphere(Model& model, Vec3 centre, float radius,
+                       std::uint32_t materialIndex, int segments, int rings)
         {
             const auto firstVertex = static_cast<std::int32_t>(model.vertices.size());
             const auto firstIndex = static_cast<std::uint32_t>(model.indices.size());
@@ -40,15 +40,18 @@ namespace r4d
             {
                 for (int x = 0; x < segments; ++x)
                 {
-                    const std::uint32_t a = static_cast<std::uint32_t>(y * (segments + 1) + x);
+                    const std::uint32_t a =
+                        static_cast<std::uint32_t>(y * (segments + 1) + x);
                     const std::uint32_t b = a + static_cast<std::uint32_t>(segments + 1);
-                    model.indices.insert(model.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+                    model.indices.insert(model.indices.end(),
+                                         {a, b, a + 1, a + 1, b, b + 1});
                 }
             }
 
             Primitive primitive;
             primitive.firstIndex = firstIndex;
-            primitive.indexCount = static_cast<std::uint32_t>(model.indices.size()) - firstIndex;
+            primitive.indexCount =
+                static_cast<std::uint32_t>(model.indices.size()) - firstIndex;
             primitive.vertexOffset = firstVertex;
             primitive.materialIndex = materialIndex;
             model.primitives.push_back(primitive);
@@ -117,8 +120,9 @@ namespace r4d
                 material.baseColour = Vec4{0.92f, 0.55f, 0.28f, 1.0f};
                 material.metallic =
                     static_cast<float>(row) / static_cast<float>(kRows - 1);
-                material.roughness = glm::clamp(
-                    static_cast<float>(column) / static_cast<float>(kColumns - 1), 0.06f, 1.0f);
+                material.roughness = glm::clamp(static_cast<float>(column) /
+                                                    static_cast<float>(kColumns - 1),
+                                                0.06f, 1.0f);
                 model.materials.push_back(material);
 
                 const Vec3 centre{column * kSpacing - width * 0.5f,

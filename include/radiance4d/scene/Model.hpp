@@ -17,7 +17,7 @@ namespace r4d
     {
         Vec3 position{0.0f, 0.0f, 0.0f};
         Vec3 normal{0.0f, 1.0f, 0.0f};
-        Vec4 tangent{1.0f, 0.0f, 0.0f, 1.0f};   // w carries bitangent handedness
+        Vec4 tangent{1.0f, 0.0f, 0.0f, 1.0f}; // w carries bitangent handedness
         Vec2 uv{0.0f, 0.0f};
     };
 
@@ -77,15 +77,20 @@ namespace r4d
         float radius = 0.0f;
     };
 
-    inline Sphere boundingSphere(const Bounds& b) { return Sphere{b.centre(), b.radius()}; }
+    inline Sphere boundingSphere(const Bounds& b)
+    {
+        return Sphere{b.centre(), b.radius()};
+    }
 
     // Smallest sphere containing both, which for nested spheres is the outer one.
     inline Sphere merge(const Sphere& a, const Sphere& b)
     {
         const Vec3 offset = b.centre - a.centre;
         const float distance = glm::length(offset);
-        if (distance + b.radius <= a.radius) return a;
-        if (distance + a.radius <= b.radius) return b;
+        if (distance + b.radius <= a.radius)
+            return a;
+        if (distance + a.radius <= b.radius)
+            return b;
 
         const float radius = (a.radius + b.radius + distance) * 0.5f;
         return Sphere{a.centre + offset * ((radius - a.radius) / distance), radius};

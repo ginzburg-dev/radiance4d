@@ -36,14 +36,14 @@ namespace r4d
         {
             switch (result)
             {
-                case cgltf_result_data_too_short:  return "data too short";
-                case cgltf_result_unknown_format:  return "unknown format";
-                case cgltf_result_invalid_json:    return "invalid json";
-                case cgltf_result_invalid_gltf:    return "invalid gltf";
-                case cgltf_result_out_of_memory:   return "out of memory";
-                case cgltf_result_file_not_found:  return "file not found";
-                case cgltf_result_io_error:        return "io error";
-                default:                           return "failed";
+                case cgltf_result_data_too_short: return "data too short";
+                case cgltf_result_unknown_format: return "unknown format";
+                case cgltf_result_invalid_json: return "invalid json";
+                case cgltf_result_invalid_gltf: return "invalid gltf";
+                case cgltf_result_out_of_memory: return "out of memory";
+                case cgltf_result_file_not_found: return "file not found";
+                case cgltf_result_io_error: return "io error";
+                default: return "failed";
             }
         }
 
@@ -63,13 +63,14 @@ namespace r4d
                 return found->second;
             }
 
-            Result<ImageRgba8> decoded = makeError(ErrorCode::NotFound, "no image source");
+            Result<ImageRgba8> decoded =
+                makeError(ErrorCode::NotFound, "no image source");
 
             if (image->buffer_view != nullptr && image->buffer_view->buffer != nullptr &&
                 image->buffer_view->buffer->data != nullptr)
             {
-                const auto* bytes = static_cast<const std::byte*>(
-                    image->buffer_view->buffer->data);
+                const auto* bytes =
+                    static_cast<const std::byte*>(image->buffer_view->buffer->data);
                 decoded = decodeImage(bytes + image->buffer_view->offset,
                                       image->buffer_view->size);
             }
@@ -86,11 +87,12 @@ namespace r4d
                         const std::string payload = uri.substr(comma + 1);
                         // Decoded size is at most 3/4 of the base64 text.
                         const cgltf_size size = payload.size() / 4 * 3;
-                        if (cgltf_load_buffer_base64(&options, size, payload.c_str(), &raw) ==
-                                cgltf_result_success &&
+                        if (cgltf_load_buffer_base64(&options, size, payload.c_str(),
+                                                     &raw) == cgltf_result_success &&
                             raw != nullptr)
                         {
-                            decoded = decodeImage(static_cast<const std::byte*>(raw), size);
+                            decoded =
+                                decodeImage(static_cast<const std::byte*>(raw), size);
                             free(raw);
                         }
                     }
@@ -128,17 +130,20 @@ namespace r4d
         }
 
         // Flat shading fallback when a mesh ships no normals.
-        void generateNormals(Model& model, std::size_t firstVertex, std::size_t firstIndex,
-                             std::size_t indexCount)
+        void generateNormals(Model& model, std::size_t firstVertex,
+                             std::size_t firstIndex, std::size_t indexCount)
         {
             for (std::size_t i = 0; i + 2 < indexCount; i += 3)
             {
-                const std::uint32_t a = model.indices[firstIndex + i] + static_cast<std::uint32_t>(firstVertex);
-                const std::uint32_t b = model.indices[firstIndex + i + 1] + static_cast<std::uint32_t>(firstVertex);
-                const std::uint32_t c = model.indices[firstIndex + i + 2] + static_cast<std::uint32_t>(firstVertex);
-                const Vec3 normal = glm::normalize(glm::cross(
-                    model.vertices[b].position - model.vertices[a].position,
-                    model.vertices[c].position - model.vertices[a].position));
+                const std::uint32_t a = model.indices[firstIndex + i] +
+                                        static_cast<std::uint32_t>(firstVertex);
+                const std::uint32_t b = model.indices[firstIndex + i + 1] +
+                                        static_cast<std::uint32_t>(firstVertex);
+                const std::uint32_t c = model.indices[firstIndex + i + 2] +
+                                        static_cast<std::uint32_t>(firstVertex);
+                const Vec3 normal = glm::normalize(
+                    glm::cross(model.vertices[b].position - model.vertices[a].position,
+                               model.vertices[c].position - model.vertices[a].position));
                 model.vertices[a].normal = normal;
                 model.vertices[b].normal = normal;
                 model.vertices[c].normal = normal;
@@ -155,8 +160,9 @@ namespace r4d
         cgltf_result result = cgltf_parse_file(&options, pathText.c_str(), &data);
         if (result != cgltf_result_success)
         {
-            return makeError(ErrorCode::IoFailure,
-                             std::format("cannot parse '{}': {}", pathText, describe(result)));
+            return makeError(
+                ErrorCode::IoFailure,
+                std::format("cannot parse '{}': {}", pathText, describe(result)));
         }
 
         result = cgltf_load_buffers(&options, data, pathText.c_str());
@@ -196,19 +202,21 @@ namespace r4d
             if (source.has_pbr_metallic_roughness)
             {
                 const auto& pbr = source.pbr_metallic_roughness;
-                material.baseColour = Vec4{pbr.base_color_factor[0], pbr.base_color_factor[1],
-                                           pbr.base_color_factor[2], pbr.base_color_factor[3]};
+                material.baseColour =
+                    Vec4{pbr.base_color_factor[0], pbr.base_color_factor[1],
+                         pbr.base_color_factor[2], pbr.base_color_factor[3]};
                 material.metallic = pbr.metallic_factor;
                 material.roughness = pbr.roughness_factor;
             }
             if (source.has_pbr_metallic_roughness)
             {
                 const auto& pbr = source.pbr_metallic_roughness;
-                material.baseColourTexture = loadTexture(
-                    model, pbr.base_color_texture.texture, baseDirectory, true, textureCache);
+                material.baseColourTexture =
+                    loadTexture(model, pbr.base_color_texture.texture, baseDirectory,
+                                true, textureCache);
                 material.metallicRoughnessTexture =
-                    loadTexture(model, pbr.metallic_roughness_texture.texture, baseDirectory,
-                                false, textureCache);
+                    loadTexture(model, pbr.metallic_roughness_texture.texture,
+                                baseDirectory, false, textureCache);
             }
             material.normalTexture = loadTexture(model, source.normal_texture.texture,
                                                  baseDirectory, false, textureCache);
@@ -234,7 +242,8 @@ namespace r4d
             for (cgltf_size p = 0; p < node.mesh->primitives_count; ++p)
             {
                 const cgltf_primitive& source = node.mesh->primitives[p];
-                if (source.type != cgltf_primitive_type_triangles || source.indices == nullptr)
+                if (source.type != cgltf_primitive_type_triangles ||
+                    source.indices == nullptr)
                 {
                     continue;
                 }
@@ -266,21 +275,23 @@ namespace r4d
                         {
                             case cgltf_attribute_type_position:
                             {
-                                const Vec4 world =
-                                    transform * Vec4{values[0], values[1], values[2], 1.0f};
+                                const Vec4 world = transform * Vec4{values[0], values[1],
+                                                                    values[2], 1.0f};
                                 vertex.position = Vec3{world};
                                 expandBounds(model.bounds, vertex.position, firstPoint);
                                 break;
                             }
                             case cgltf_attribute_type_normal:
-                                vertex.normal = glm::normalize(Vec3{
-                                    normalMatrix * Vec4{values[0], values[1], values[2], 0.0f}});
+                                vertex.normal = glm::normalize(
+                                    Vec3{normalMatrix *
+                                         Vec4{values[0], values[1], values[2], 0.0f}});
                                 hasNormals = true;
                                 break;
                             case cgltf_attribute_type_tangent:
                             {
-                                const Vec3 tangent = Vec3{
-                                    transform * Vec4{values[0], values[1], values[2], 0.0f}};
+                                const Vec3 tangent =
+                                    Vec3{transform *
+                                         Vec4{values[0], values[1], values[2], 0.0f}};
                                 vertex.tangent = Vec4{glm::normalize(tangent), values[3]};
                                 hasTangents = true;
                                 break;
@@ -291,8 +302,7 @@ namespace r4d
                                     vertex.uv = Vec2{values[0], values[1]};
                                 }
                                 break;
-                            default:
-                                break;
+                            default: break;
                         }
                     }
                 }
@@ -301,8 +311,8 @@ namespace r4d
                 model.indices.resize(firstIndex + indexCount);
                 for (cgltf_size v = 0; v < indexCount; ++v)
                 {
-                    model.indices[firstIndex + v] =
-                        static_cast<std::uint32_t>(cgltf_accessor_read_index(source.indices, v));
+                    model.indices[firstIndex + v] = static_cast<std::uint32_t>(
+                        cgltf_accessor_read_index(source.indices, v));
                 }
 
                 if (!hasNormals && vertexCount > 0)
@@ -349,11 +359,12 @@ namespace r4d
         for (std::size_t i = 0; i < model.materials.size(); ++i)
         {
             const Material& m = model.materials[i];
-            R4D_INFO("glTF material[{}] {}: base({:.2f},{:.2f},{:.2f}) metal {:.2f} rough {:.2f} "
+            R4D_INFO("glTF material[{}] {}: base({:.2f},{:.2f},{:.2f}) metal {:.2f} "
+                     "rough {:.2f} "
                      "tex base={} mr={} nrm={}",
-                     i, m.name, m.baseColour.x, m.baseColour.y, m.baseColour.z, m.metallic,
-                     m.roughness, m.baseColourTexture, m.metallicRoughnessTexture,
-                     m.normalTexture);
+                     i, m.name, m.baseColour.x, m.baseColour.y, m.baseColour.z,
+                     m.metallic, m.roughness, m.baseColourTexture,
+                     m.metallicRoughnessTexture, m.normalTexture);
         }
         {
             Vec2 uvMin{1e9f, 1e9f};
@@ -363,8 +374,8 @@ namespace r4d
                 uvMin = glm::min(uvMin, v.uv);
                 uvMax = glm::max(uvMax, v.uv);
             }
-            R4D_INFO("glTF uv range: ({:.3f},{:.3f}) .. ({:.3f},{:.3f})", uvMin.x, uvMin.y,
-                     uvMax.x, uvMax.y);
+            R4D_INFO("glTF uv range: ({:.3f},{:.3f}) .. ({:.3f},{:.3f})", uvMin.x,
+                     uvMin.y, uvMax.x, uvMax.y);
             R4D_INFO("glTF bounds: ({:.2f},{:.2f},{:.2f}) .. ({:.2f},{:.2f},{:.2f})",
                      model.bounds.min.x, model.bounds.min.y, model.bounds.min.z,
                      model.bounds.max.x, model.bounds.max.y, model.bounds.max.z);
@@ -377,9 +388,10 @@ namespace r4d
 
         attachDefaultEnvironment(model);
 
-        R4D_INFO("glTF: {} vertices, {} triangles, {} primitives, {} materials, {} textures",
-                 model.vertices.size(), model.triangleCount(), model.primitives.size(),
-                 model.materials.size(), model.textures.size());
+        R4D_INFO(
+            "glTF: {} vertices, {} triangles, {} primitives, {} materials, {} textures",
+            model.vertices.size(), model.triangleCount(), model.primitives.size(),
+            model.materials.size(), model.textures.size());
         return model;
     }
 

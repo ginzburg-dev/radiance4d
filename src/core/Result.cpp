@@ -10,10 +10,8 @@ namespace r4d
     {
         if (hresult != 0)
         {
-            return std::format("{} (hr=0x{:08X}): {}",
-                               r4d::ToString(code),
-                               static_cast<unsigned long>(hresult),
-                               message);
+            return std::format("{} (hr=0x{:08X}): {}", r4d::ToString(code),
+                               static_cast<unsigned long>(hresult), message);
         }
         return std::format("{}: {}", r4d::ToString(code), message);
     }

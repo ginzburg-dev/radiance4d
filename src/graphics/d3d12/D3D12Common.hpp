@@ -19,34 +19,37 @@
 namespace r4d::d3d12
 {
 
-    template <typename T>
+    template<typename T>
     using ComPtr = Microsoft::WRL::ComPtr<T>;
 
     std::string hresultToString(HRESULT hr);
 
     inline Error hresultError(ErrorCode code, HRESULT hr, std::string_view what)
     {
-        return makeError(code,
-                         std::format("{}: {}", what, hresultToString(hr)),
+        return makeError(code, std::format("{}: {}", what, hresultToString(hr)),
                          static_cast<long>(hr));
     }
 
 } // namespace r4d::d3d12
 
-#define R4D_HR(expr, what)                                                     \
-    do {                                                                       \
-        const HRESULT _r4d_hr = (expr);                                        \
-        if (FAILED(_r4d_hr)) {                                                 \
-            return ::r4d::d3d12::hresultError(::r4d::ErrorCode::ApiCallFailed, \
-                                              _r4d_hr, (what));                \
-        }                                                                      \
+#define R4D_HR(expr, what)                                                               \
+    do                                                                                   \
+    {                                                                                    \
+        const HRESULT _r4d_hr = (expr);                                                  \
+        if (FAILED(_r4d_hr))                                                             \
+        {                                                                                \
+            return ::r4d::d3d12::hresultError(::r4d::ErrorCode::ApiCallFailed, _r4d_hr,  \
+                                              (what));                                   \
+        }                                                                                \
     } while (false)
 
-#define R4D_HR_DEVICE(expr, what)                                                     \
-    do {                                                                              \
-        const HRESULT _r4d_hr = (expr);                                               \
-        if (FAILED(_r4d_hr)) {                                                        \
-            return ::r4d::d3d12::hresultError(::r4d::ErrorCode::DeviceCreationFailed, \
-                                              _r4d_hr, (what));                       \
-        }                                                                             \
+#define R4D_HR_DEVICE(expr, what)                                                        \
+    do                                                                                   \
+    {                                                                                    \
+        const HRESULT _r4d_hr = (expr);                                                  \
+        if (FAILED(_r4d_hr))                                                             \
+        {                                                                                \
+            return ::r4d::d3d12::hresultError(::r4d::ErrorCode::DeviceCreationFailed,    \
+                                              _r4d_hr, (what));                          \
+        }                                                                                \
     } while (false)

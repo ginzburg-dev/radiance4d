@@ -12,8 +12,16 @@ namespace r4d
     enum class Key : std::size_t
     {
         Escape = 0,
-        F1, F2, F3, F4,
-        W, A, S, D, Q, E,
+        F1,
+        F2,
+        F3,
+        F4,
+        W,
+        A,
+        S,
+        D,
+        Q,
+        E,
         Space,
         Shift,
         Control,
@@ -52,7 +60,8 @@ namespace r4d
         void setDown(Key key, bool isDown)
         {
             const std::size_t i = index(key);
-            if (isDown && !m_down[i]) m_pressed[i] = true;
+            if (isDown && !m_down[i])
+                m_pressed[i] = true;
             m_down[i] = isDown;
         }
 
@@ -82,7 +91,10 @@ namespace r4d
         }
 
     private:
-        static constexpr std::size_t index(Key key) { return static_cast<std::size_t>(key); }
+        static constexpr std::size_t index(Key key)
+        {
+            return static_cast<std::size_t>(key);
+        }
         static constexpr std::size_t index(MouseButton button)
         {
             return static_cast<std::size_t>(button);

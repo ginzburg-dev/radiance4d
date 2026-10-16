@@ -25,7 +25,8 @@ namespace r4d::d3d12
                 return {};
             }
             std::string utf8(static_cast<std::size_t>(needed - 1), '\0');
-            ::WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8.data(), needed, nullptr, nullptr);
+            ::WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8.data(), needed, nullptr,
+                                  nullptr);
             return utf8;
         }
 
@@ -34,7 +35,8 @@ namespace r4d::d3d12
             std::string out;
             out.reserve(text.size());
             std::transform(text.begin(), text.end(), std::back_inserter(out),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                           [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
             return out;
         }
 
@@ -73,8 +75,8 @@ namespace r4d::d3d12
             std::wstring buffer(MAX_PATH, L'\0');
             for (;;)
             {
-                const DWORD written =
-                    ::GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+                const DWORD written = ::GetModuleFileNameW(
+                    module, buffer.data(), static_cast<DWORD>(buffer.size()));
                 if (written == 0)
                 {
                     return {};
@@ -93,7 +95,8 @@ namespace r4d::d3d12
         std::uint32_t queryRuntimeSdkVersion(ID3D12Device* device)
         {
             ComPtr<ID3D12DeviceConfiguration> config;
-            if (device != nullptr && SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&config))))
+            if (device != nullptr &&
+                SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&config))))
             {
                 const D3D12_DEVICE_CONFIGURATION_DESC desc = config->GetDesc();
                 return static_cast<std::uint32_t>(desc.SDKVersion);
@@ -113,7 +116,8 @@ namespace r4d::d3d12
                 const std::string loweredPath = toLower(corePath);
                 if (loweredPath.find(toLower(exeDir)) == 0)
                 {
-                    origin = "Agility SDK redistributable (shipped alongside the executable)";
+                    origin =
+                        "Agility SDK redistributable (shipped alongside the executable)";
                 }
                 else
                 {
@@ -123,13 +127,12 @@ namespace r4d::d3d12
 
             std::string built;
 #if R4D_ENABLE_AGILITY_SDK
-            built = std::format(", built against D3D12_SDK_VERSION={}", R4D_AGILITY_SDK_VERSION);
+            built = std::format(", built against D3D12_SDK_VERSION={}",
+                                R4D_AGILITY_SDK_VERSION);
 #endif
-            return std::format("{} [{}], reported SDKVersion={}{}",
-                               origin,
+            return std::format("{} [{}], reported SDKVersion={}{}", origin,
                                corePath.empty() ? "D3D12Core.dll not loaded" : corePath,
-                               runtimeSdkVersion,
-                               built);
+                               runtimeSdkVersion, built);
         }
 
         std::string featureLevelToString(D3D_FEATURE_LEVEL level)
@@ -141,8 +144,7 @@ namespace r4d::d3d12
                 case D3D_FEATURE_LEVEL_12_0: return "12_0";
                 case D3D_FEATURE_LEVEL_12_1: return "12_1";
                 case D3D_FEATURE_LEVEL_12_2: return "12_2";
-                default:
-                    return std::format("0x{:04X}", static_cast<unsigned>(level));
+                default: return std::format("0x{:04X}", static_cast<unsigned>(level));
             }
         }
     } // namespace
@@ -153,16 +155,15 @@ namespace r4d::d3d12
         const DWORD written = ::FormatMessageA(
             FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                 FORMAT_MESSAGE_IGNORE_INSERTS,
-            nullptr, static_cast<DWORD>(hr),
-            MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
+            nullptr, static_cast<DWORD>(hr), MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
             reinterpret_cast<LPSTR>(&buffer), 0, nullptr);
 
         std::string message;
         if (written != 0 && buffer != nullptr)
         {
             message.assign(buffer, written);
-            while (!message.empty() &&
-                   (message.back() == '\n' || message.back() == '\r' || message.back() == '.'))
+            while (!message.empty() && (message.back() == '\n' ||
+                                        message.back() == '\r' || message.back() == '.'))
             {
                 message.pop_back();
             }
@@ -179,7 +180,8 @@ namespace r4d::d3d12
         return std::format("HRESULT 0x{:08X} ({})", static_cast<unsigned>(hr), message);
     }
 
-    Result<SelectedAdapter> selectAdapter(IDXGIFactory6* factory, const std::string& selector)
+    Result<SelectedAdapter> selectAdapter(IDXGIFactory6* factory,
+                                          const std::string& selector)
     {
         const std::string wanted = toLower(selector);
 
@@ -227,7 +229,8 @@ namespace r4d::d3d12
             candidate.info = describeAdapter(adapter.Get());
             candidate.usable = supportsD3D12(adapter.Get());
             R4D_INFO("Adapter[{}]: {}{}", index, candidate.info.ToString(),
-                     candidate.usable ? "" : " -- cannot create a D3D12 device, skipping");
+                     candidate.usable ? ""
+                                      : " -- cannot create a D3D12 device, skipping");
             candidates.push_back(std::move(candidate));
         }
 
@@ -242,8 +245,8 @@ namespace r4d::d3d12
                         [](unsigned char c) { return std::isdigit(c) != 0; }))
         {
             std::size_t index = 0;
-            const auto parsed = std::from_chars(
-                wanted.data(), wanted.data() + wanted.size(), index);
+            const auto parsed =
+                std::from_chars(wanted.data(), wanted.data() + wanted.size(), index);
             if (parsed.ec != std::errc{} || index >= candidates.size())
             {
                 return makeError(ErrorCode::InvalidArgument,
@@ -252,9 +255,10 @@ namespace r4d::d3d12
             }
             if (!candidates[index].usable)
             {
-                return makeError(ErrorCode::DeviceCreationFailed,
-                                 std::format("adapter {} ({}) cannot create a D3D12 device",
-                                             index, candidates[index].info.name));
+                return makeError(
+                    ErrorCode::DeviceCreationFailed,
+                    std::format("adapter {} ({}) cannot create a D3D12 device", index,
+                                candidates[index].info.name));
             }
             SelectedAdapter selected;
             selected.adapter = candidates[index].adapter;
@@ -302,11 +306,8 @@ namespace r4d::d3d12
         GpuCapabilities caps;
 
         static constexpr D3D_FEATURE_LEVEL kLevels[] = {
-            D3D_FEATURE_LEVEL_12_2,
-            D3D_FEATURE_LEVEL_12_1,
-            D3D_FEATURE_LEVEL_12_0,
-            D3D_FEATURE_LEVEL_11_1,
-            D3D_FEATURE_LEVEL_11_0,
+            D3D_FEATURE_LEVEL_12_2, D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_12_0,
+            D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
         };
         D3D12_FEATURE_DATA_FEATURE_LEVELS levels{};
         levels.NumFeatureLevels = static_cast<UINT>(std::size(kLevels));
@@ -325,7 +326,8 @@ namespace r4d::d3d12
             if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,
                                                       &shaderModel, sizeof(shaderModel))))
             {
-                const unsigned actual = static_cast<unsigned>(shaderModel.HighestShaderModel);
+                const unsigned actual =
+                    static_cast<unsigned>(shaderModel.HighestShaderModel);
                 caps.highestShaderModel =
                     std::format("{}_{}", (actual >> 4) & 0xF, actual & 0xF);
                 break;
@@ -336,13 +338,14 @@ namespace r4d::d3d12
         if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options,
                                                   sizeof(options))))
         {
-            caps.resourceBindingTier = static_cast<std::uint32_t>(options.ResourceBindingTier);
+            caps.resourceBindingTier =
+                static_cast<std::uint32_t>(options.ResourceBindingTier);
             caps.resourceHeapTier = static_cast<std::uint32_t>(options.ResourceHeapTier);
         }
 
         D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12{};
-        if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12,
-                                                  sizeof(options12))))
+        if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12,
+                                                  &options12, sizeof(options12))))
         {
             caps.enhancedBarriersSupported = options12.EnhancedBarriersSupported != FALSE;
         }
@@ -367,7 +370,8 @@ namespace r4d::d3d12
         {
             BOOL allowTearing = FALSE;
             if (SUCCEEDED(factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING,
-                                                       &allowTearing, sizeof(allowTearing))))
+                                                       &allowTearing,
+                                                       sizeof(allowTearing))))
             {
                 caps.tearingSupported = allowTearing != FALSE;
             }

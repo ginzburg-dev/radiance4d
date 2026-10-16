@@ -19,16 +19,19 @@
 
 // Include guards defined by the SDK headers.
 #if defined(__d3d12_h__)
-#error "A public Radiance4D header leaks d3d12.h. D3D12 types must stay inside src/graphics/d3d12/."
+#error                                                                                   \
+    "A public Radiance4D header leaks d3d12.h. D3D12 types must stay inside src/graphics/d3d12/."
 #endif
 
-#if defined(__dxgi_h__) || defined(__dxgi1_2_h__) || defined(__dxgi1_3_h__) || \
+#if defined(__dxgi_h__) || defined(__dxgi1_2_h__) || defined(__dxgi1_3_h__) ||           \
     defined(__dxgi1_4_h__) || defined(__dxgi1_5_h__) || defined(__dxgi1_6_h__)
-#error "A public Radiance4D header leaks a dxgi header. DXGI types must stay inside src/graphics/d3d12/."
+#error                                                                                   \
+    "A public Radiance4D header leaks a dxgi header. DXGI types must stay inside src/graphics/d3d12/."
 #endif
 
 #if defined(_WINDOWS_)
-#error "A public Radiance4D header leaks windows.h. Window hands out its HWND as an opaque void*."
+#error                                                                                   \
+    "A public Radiance4D header leaks windows.h. Window hands out its HWND as an opaque void*."
 #endif
 
 #include <gtest/gtest.h>
@@ -44,9 +47,10 @@ TEST(IncludeHygiene, PublicHeadersDoNotLeakGraphicsApiTypes)
 TEST(IncludeHygiene, NativeWindowHandleIsOpaque)
 {
     // A real HWND here would mean windows.h leaked into the public headers.
-    static_assert(std::is_same_v<decltype(std::declval<const r4d::Window&>().nativeHandle()),
-                                 void*>,
-                  "Window::nativeHandle() must stay an opaque void*");
+    static_assert(
+        std::is_same_v<decltype(std::declval<const r4d::Window&>().nativeHandle()),
+                       void*>,
+        "Window::nativeHandle() must stay an opaque void*");
     SUCCEED();
 }
 

@@ -11,7 +11,8 @@ namespace r4d
 
     const std::filesystem::path& executableDirectory()
     {
-        static const std::filesystem::path dir = []() -> std::filesystem::path {
+        static const std::filesystem::path dir = []() -> std::filesystem::path
+        {
             std::wstring buffer(MAX_PATH, L'\0');
             for (;;)
             {
@@ -39,8 +40,9 @@ namespace r4d
         const auto size = std::filesystem::file_size(path, ec);
         if (ec)
         {
-            return makeError(ErrorCode::NotFound,
-                             std::format("cannot stat '{}': {}", path.string(), ec.message()));
+            return makeError(
+                ErrorCode::NotFound,
+                std::format("cannot stat '{}': {}", path.string(), ec.message()));
         }
 
         std::ifstream file{path, std::ios::binary};
@@ -51,8 +53,8 @@ namespace r4d
         }
 
         std::vector<std::byte> bytes(static_cast<std::size_t>(size));
-        if (size > 0 &&
-            !file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
+        if (size > 0 && !file.read(reinterpret_cast<char*>(bytes.data()),
+                                   static_cast<std::streamsize>(size)))
         {
             return makeError(ErrorCode::IoFailure,
                              std::format("short read on '{}'", path.string()));

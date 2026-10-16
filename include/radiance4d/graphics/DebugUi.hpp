@@ -24,4 +24,4 @@ namespace r4d
                          const GpuCapabilities& capabilities, const std::string& backend,
                          bool vsync, const std::string& cameraMode,
                          RenderSettings& settings);
-}
+} // namespace r4d

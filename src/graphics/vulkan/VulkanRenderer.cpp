@@ -108,8 +108,9 @@ namespace r4d::vulkan
         // Must match R4D_TILE_SIZE in SplatTiles.hlsli.
         constexpr std::uint32_t kSplatTileSize = 16;
         // Enough tile ranges for any viewport this renderer will be resized to.
-        constexpr std::uint32_t kMaxTiles = ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
-                                            ((4320 + kSplatTileSize - 1) / kSplatTileSize);
+        constexpr std::uint32_t kMaxTiles =
+            ((7680 + kSplatTileSize - 1) / kSplatTileSize) *
+            ((4320 + kSplatTileSize - 1) / kSplatTileSize);
         // The (tile, splat) pairs a cloud starts with, per splat. Only a guess:
         // what a view wants is set by how much screen the splats cover, so a
         // frame that wants more grows the buffers to the total it measured.
@@ -140,7 +141,6 @@ namespace r4d::vulkan
             float padding;
         };
         static_assert(sizeof(SplatProjection) == 48);
-
 
         // Orders every preceding access against every following one. The sort
         // stages each read what the one before wrote, across six buffers, which
@@ -233,7 +233,8 @@ namespace r4d::vulkan
 
         if (m_headless)
         {
-            R4D_INFO("Renderer: headless -- no swapchain, rendering to an offscreen target");
+            R4D_INFO(
+                "Renderer: headless -- no swapchain, rendering to an offscreen target");
             R4D_TRY(createOffscreenTarget(m_size));
         }
         else
@@ -256,11 +257,12 @@ namespace r4d::vulkan
         {
             const auto beside = executableDirectory() / "shaders";
             std::error_code ec;
-            shaderDirectory = std::filesystem::is_directory(beside, ec) ? beside
+            shaderDirectory = std::filesystem::is_directory(beside, ec)
+                                  ? beside
 #ifdef R4D_SHADER_DIR
-                                                                       : std::filesystem::path{R4D_SHADER_DIR};
+                                  : std::filesystem::path{R4D_SHADER_DIR};
 #else
-                                                                       : beside;
+                                  : beside;
 #endif
         }
         R4D_INFO("Renderer: shader directory '{}'", shaderDirectory.string());
@@ -291,8 +293,8 @@ namespace r4d::vulkan
     Status VulkanRenderer::createSwapchain(UVec2 size)
     {
         VkSurfaceCapabilitiesKHR caps{};
-        R4D_VK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_context.physicalDevice, m_surface,
-                                                         &caps),
+        R4D_VK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_context.physicalDevice,
+                                                         m_surface, &caps),
                "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
         std::uint32_t formatCount = 0;
@@ -302,10 +304,10 @@ namespace r4d::vulkan
         vkGetPhysicalDeviceSurfaceFormatsKHR(m_context.physicalDevice, m_surface,
                                              &formatCount, formats.data());
 
-        VkSurfaceFormatKHR chosen = formats.empty()
-                                        ? VkSurfaceFormatKHR{kColourFormat,
-                                                             VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
-                                        : formats.front();
+        VkSurfaceFormatKHR chosen =
+            formats.empty()
+                ? VkSurfaceFormatKHR{kColourFormat, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
+                : formats.front();
         for (const VkSurfaceFormatKHR& format : formats)
         {
             // Match the D3D12 backend, which presents a plain UNORM back buffer and
@@ -329,7 +331,8 @@ namespace r4d::vulkan
         VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
         if (!m_vsync)
         {
-            const auto has = [&](VkPresentModeKHR mode) {
+            const auto has = [&](VkPresentModeKHR mode)
+            {
                 return std::find(presentModes.begin(), presentModes.end(), mode) !=
                        presentModes.end();
             };
@@ -366,7 +369,8 @@ namespace r4d::vulkan
         info.imageColorSpace = chosen.colorSpace;
         info.imageExtent = extent;
         info.imageArrayLayers = 1;
-        info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        info.imageUsage =
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.preTransform = caps.currentTransform;
         info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -408,8 +412,8 @@ namespace r4d::vulkan
         }
 
         m_size = UVec2{extent.width, extent.height};
-        R4D_INFO("Swapchain: {}x{}, {} images, present mode {}", m_size.x, m_size.y, count,
-                 static_cast<int>(presentMode));
+        R4D_INFO("Swapchain: {}x{}, {} images, present mode {}", m_size.x, m_size.y,
+                 count, static_cast<int>(presentMode));
         return Status::Ok();
     }
 
@@ -438,8 +442,8 @@ namespace r4d::vulkan
     {
         destroyImage(m_splatColour);
         auto image = createImage(size.x, size.y, kSplatColourFormat,
-                                 VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1,
-                                 VK_IMAGE_ASPECT_COLOR_BIT);
+                                 VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                 1, VK_IMAGE_ASPECT_COLOR_BIT);
         if (!image)
         {
             return image.error();
@@ -474,7 +478,8 @@ namespace r4d::vulkan
             {VK_DESCRIPTOR_TYPE_SAMPLER, 8},
             {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8},
         };
-        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        VkDescriptorPoolCreateInfo poolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
         poolInfo.maxSets = 16;
         poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
@@ -606,13 +611,14 @@ namespace r4d::vulkan
         imageBarrier(commandBuffer, m_shadowMap.handle,
                      m_shadowMapInitialised ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                                             : VK_IMAGE_LAYOUT_UNDEFINED,
-                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0,
-                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE,
+                     0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                      VK_IMAGE_ASPECT_DEPTH_BIT);
         m_shadowMapInitialised = true;
 
-        VkRenderingAttachmentInfo depthAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        VkRenderingAttachmentInfo depthAttachment{
+            VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         depthAttachment.imageView = m_shadowMap.view;
         depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -626,30 +632,38 @@ namespace r4d::vulkan
 
         vkCmdBeginRendering(commandBuffer, &rendering);
 
-        VkViewport viewport{0.0f, 0.0f, static_cast<float>(kShadowMapSize),
-                            static_cast<float>(kShadowMapSize), 0.0f, 1.0f};
+        VkViewport viewport{0.0f,
+                            0.0f,
+                            static_cast<float>(kShadowMapSize),
+                            static_cast<float>(kShadowMapSize),
+                            0.0f,
+                            1.0f};
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
         VkRect2D scissor{{0, 0}, {kShadowMapSize, kShadowMapSize}};
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          m_shadowPipeline);
 
         const VkDeviceSize vertexOffset = 0;
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &m_vertexBuffer.handle, &vertexOffset);
-        vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &m_vertexBuffer.handle,
+                               &vertexOffset);
+        vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.handle, 0,
+                             VK_INDEX_TYPE_UINT32);
 
         const std::uint32_t frameIndex =
             static_cast<std::uint32_t>(m_frameCounter % kFramesInFlight);
         for (const Primitive& primitive : m_primitives)
         {
             const std::uint32_t materialIndex =
-                primitive.materialIndex < m_materialSets.size() ? primitive.materialIndex : 0;
+                primitive.materialIndex < m_materialSets.size() ? primitive.materialIndex
+                                                                : 0;
             const std::uint32_t offsets[2] = {
                 static_cast<std::uint32_t>(frameIndex * m_frameStride),
                 static_cast<std::uint32_t>(materialIndex * m_materialStride)};
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    m_pipelineLayout, 0, 1, &m_materialSets[materialIndex], 2,
-                                    offsets);
+                                    m_pipelineLayout, 0, 1,
+                                    &m_materialSets[materialIndex], 2, offsets);
             vkCmdDrawIndexed(commandBuffer, primitive.indexCount, 1, primitive.firstIndex,
                              static_cast<std::int32_t>(primitive.vertexOffset), 0);
         }
@@ -665,7 +679,8 @@ namespace r4d::vulkan
                      VK_IMAGE_ASPECT_DEPTH_BIT);
     }
 
-    Status VulkanRenderer::createShadowPipeline(const std::filesystem::path& shaderDirectory)
+    Status
+    VulkanRenderer::createShadowPipeline(const std::filesystem::path& shaderDirectory)
     {
         auto vertexModule = loadShaderModule(shaderDirectory, "Shadow.vs.spv");
         if (!vertexModule)
@@ -752,7 +767,8 @@ namespace r4d::vulkan
             VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
         rendering.depthAttachmentFormat = kDepthFormat;
 
-        VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        VkGraphicsPipelineCreateInfo info{
+            VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
         info.pNext = &rendering;
         info.stageCount = 2;
         info.pStages = stages;
@@ -766,8 +782,8 @@ namespace r4d::vulkan
         info.pDynamicState = &dynamic;
         info.layout = m_pipelineLayout;
 
-        const VkResult result = vkCreateGraphicsPipelines(m_context.device, VK_NULL_HANDLE, 1,
-                                                          &info, nullptr, &m_shadowPipeline);
+        const VkResult result = vkCreateGraphicsPipelines(
+            m_context.device, VK_NULL_HANDLE, 1, &info, nullptr, &m_shadowPipeline);
         vkDestroyShaderModule(m_context.device, vertexModule.value(), nullptr);
         vkDestroyShaderModule(m_context.device, fragmentModule.value(), nullptr);
         if (result != VK_SUCCESS)
@@ -811,11 +827,13 @@ namespace r4d::vulkan
             allocInfo.commandPool = frame.commandPool;
             allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             allocInfo.commandBufferCount = 1;
-            R4D_VK(vkAllocateCommandBuffers(m_context.device, &allocInfo, &frame.commandBuffer),
+            R4D_VK(vkAllocateCommandBuffers(m_context.device, &allocInfo,
+                                            &frame.commandBuffer),
                    "vkAllocateCommandBuffers");
 
             VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-            R4D_VK(vkCreateSemaphore(m_context.device, &semaphoreInfo, nullptr, &frame.acquired),
+            R4D_VK(vkCreateSemaphore(m_context.device, &semaphoreInfo, nullptr,
+                                     &frame.acquired),
                    "vkCreateSemaphore (acquired)");
 
             VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
@@ -835,11 +853,10 @@ namespace r4d::vulkan
         m_frameStride = alignUp(sizeof(FrameConstants), alignment);
         m_materialStride = alignUp(sizeof(MaterialConstants), alignment);
 
-        auto frameBuffer = createBuffer(m_frameStride * kFramesInFlight,
-                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                        "frame uniforms");
+        auto frameBuffer = createBuffer(
+            m_frameStride * kFramesInFlight, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            "frame uniforms");
         if (!frameBuffer)
         {
             return frameBuffer.error();
@@ -936,7 +953,8 @@ namespace r4d::vulkan
     {
         if (m_context.timestampPeriod <= 0.0f)
         {
-            R4D_WARN("Profiler: device reports no timestamp period; GPU timings disabled");
+            R4D_WARN(
+                "Profiler: device reports no timestamp period; GPU timings disabled");
             return Status::Ok();
         }
         VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
@@ -977,16 +995,17 @@ namespace r4d::vulkan
         m_passScopeMask[frameIndex] |= 1u << static_cast<std::uint32_t>(pass);
     }
 
-    Result<VkShaderModule> VulkanRenderer::loadShaderModule(
-        const std::filesystem::path& directory, std::string_view name) const
+    Result<VkShaderModule>
+    VulkanRenderer::loadShaderModule(const std::filesystem::path& directory,
+                                     std::string_view name) const
     {
         const auto path = directory / name;
         auto blob = readBinaryFile(path);
         if (!blob)
         {
-            return makeError(ErrorCode::ShaderLoadFailed,
-                             std::format("cannot read '{}': {}", path.string(),
-                                         blob.error().message));
+            return makeError(
+                ErrorCode::ShaderLoadFailed,
+                std::format("cannot read '{}': {}", path.string(), blob.error().message));
         }
         if (blob.value().empty() || blob.value().size() % 4 != 0)
         {
@@ -1077,8 +1096,9 @@ namespace r4d::vulkan
         depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 
         VkPipelineColorBlendAttachmentState blendAttachment{};
-        blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        blendAttachment.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
         VkPipelineColorBlendStateCreateInfo blend{
             VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
@@ -1099,8 +1119,9 @@ namespace r4d::vulkan
         rendering.pColorAttachmentFormats = &colourFormat;
         rendering.depthAttachmentFormat = kDepthFormat;
 
-        VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        info.pNext = &rendering;   // dynamic rendering: no render pass object
+        VkGraphicsPipelineCreateInfo info{
+            VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        info.pNext = &rendering; // dynamic rendering: no render pass object
         info.stageCount = 2;
         info.pStages = stages;
         info.pVertexInputState = &vertexInput;
@@ -1114,19 +1135,21 @@ namespace r4d::vulkan
         info.layout = m_pipelineLayout;
         info.renderPass = VK_NULL_HANDLE;
 
-        const VkResult result = vkCreateGraphicsPipelines(m_context.device, VK_NULL_HANDLE, 1,
-                                                          &info, nullptr, &m_pipeline);
+        const VkResult result = vkCreateGraphicsPipelines(
+            m_context.device, VK_NULL_HANDLE, 1, &info, nullptr, &m_pipeline);
         vkDestroyShaderModule(m_context.device, vertexModule.value(), nullptr);
         vkDestroyShaderModule(m_context.device, fragmentModule.value(), nullptr);
         if (result != VK_SUCCESS)
         {
-            return vulkanError(ErrorCode::ApiCallFailed, result, "vkCreateGraphicsPipelines");
+            return vulkanError(ErrorCode::ApiCallFailed, result,
+                               "vkCreateGraphicsPipelines");
         }
 
         return Status::Ok();
     }
 
-    Status VulkanRenderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
+    Status
+    VulkanRenderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
     {
         // One texture, fetched by its coordinate, so there is no sampler and
         // nothing else to bind: the tile rasteriser already did the work.
@@ -1215,8 +1238,9 @@ namespace r4d::vulkan
         blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-        blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        blendAttachment.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
         VkPipelineColorBlendStateCreateInfo blend{
             VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
@@ -1237,7 +1261,8 @@ namespace r4d::vulkan
         rendering.pColorAttachmentFormats = &colourFormat;
         rendering.depthAttachmentFormat = kDepthFormat;
 
-        VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        VkGraphicsPipelineCreateInfo info{
+            VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
         info.pNext = &rendering;
         info.stageCount = 2;
         info.pStages = stages;
@@ -1251,8 +1276,8 @@ namespace r4d::vulkan
         info.pDynamicState = &dynamic;
         info.layout = m_splatPipelineLayout;
 
-        const VkResult result = vkCreateGraphicsPipelines(m_context.device, VK_NULL_HANDLE, 1,
-                                                          &info, nullptr, &m_splatPipeline);
+        const VkResult result = vkCreateGraphicsPipelines(
+            m_context.device, VK_NULL_HANDLE, 1, &info, nullptr, &m_splatPipeline);
         vkDestroyShaderModule(m_context.device, vertexModule.value(), nullptr);
         vkDestroyShaderModule(m_context.device, fragmentModule.value(), nullptr);
         if (result != VK_SUCCESS)
@@ -1263,9 +1288,9 @@ namespace r4d::vulkan
         return Status::Ok();
     }
 
-    Result<VulkanRenderer::Buffer> VulkanRenderer::createBuffer(
-        VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
-        const char* name)
+    Result<VulkanRenderer::Buffer>
+    VulkanRenderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+                                 VkMemoryPropertyFlags properties, const char* name)
     {
         Buffer buffer;
         buffer.size = size;
@@ -1298,8 +1323,9 @@ namespace r4d::vulkan
 
         if ((properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
         {
-            R4D_VK(vkMapMemory(m_context.device, buffer.memory, 0, size, 0, &buffer.mapped),
-                   std::format("vkMapMemory ({})", name));
+            R4D_VK(
+                vkMapMemory(m_context.device, buffer.memory, 0, size, 0, &buffer.mapped),
+                std::format("vkMapMemory ({})", name));
         }
         return buffer;
     }
@@ -1324,9 +1350,10 @@ namespace r4d::vulkan
         buffer.size = 0;
     }
 
-    Result<VulkanRenderer::Image> VulkanRenderer::createImage(
-        std::uint32_t width, std::uint32_t height, VkFormat format, VkImageUsageFlags usage,
-        std::uint32_t mipLevels, VkImageAspectFlags aspect)
+    Result<VulkanRenderer::Image>
+    VulkanRenderer::createImage(std::uint32_t width, std::uint32_t height,
+                                VkFormat format, VkImageUsageFlags usage,
+                                std::uint32_t mipLevels, VkImageAspectFlags aspect)
     {
         Image image;
         image.format = format;
@@ -1343,15 +1370,17 @@ namespace r4d::vulkan
         info.usage = usage;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        R4D_VK(vkCreateImage(m_context.device, &info, nullptr, &image.handle), "vkCreateImage");
+        R4D_VK(vkCreateImage(m_context.device, &info, nullptr, &image.handle),
+               "vkCreateImage");
 
         VkMemoryRequirements requirements{};
         vkGetImageMemoryRequirements(m_context.device, image.handle, &requirements);
-        const std::uint32_t typeIndex = findMemoryType(m_context, requirements.memoryTypeBits,
-                                                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        const std::uint32_t typeIndex = findMemoryType(
+            m_context, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (typeIndex == UINT32_MAX)
         {
-            return makeError(ErrorCode::ApiCallFailed, "no device-local memory type for image");
+            return makeError(ErrorCode::ApiCallFailed,
+                             "no device-local memory type for image");
         }
 
         VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
@@ -1396,7 +1425,8 @@ namespace r4d::vulkan
 
     Result<VkCommandBuffer> VulkanRenderer::beginOneShot(VkCommandPool pool)
     {
-        VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        VkCommandBufferAllocateInfo allocInfo{
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         allocInfo.commandPool = pool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
@@ -1415,31 +1445,35 @@ namespace r4d::vulkan
     {
         R4D_VK(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
 
-        VkCommandBufferSubmitInfo commandInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+        VkCommandBufferSubmitInfo commandInfo{
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
         commandInfo.commandBuffer = commandBuffer;
 
         VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
         submit.commandBufferInfoCount = 1;
         submit.pCommandBufferInfos = &commandInfo;
 
-        R4D_VK(vkQueueSubmit2(m_context.queue, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit2");
+        R4D_VK(vkQueueSubmit2(m_context.queue, 1, &submit, VK_NULL_HANDLE),
+               "vkQueueSubmit2");
         R4D_VK(vkQueueWaitIdle(m_context.queue), "vkQueueWaitIdle");
 
         vkFreeCommandBuffers(m_context.device, pool, 1, &commandBuffer);
         return Status::Ok();
     }
 
-    Result<VulkanRenderer::Image> VulkanRenderer::createTexture(
-        const ImageRgba8& source, bool srgb, VkCommandBuffer commandBuffer,
-        std::vector<Buffer>& staging)
+    Result<VulkanRenderer::Image>
+    VulkanRenderer::createTexture(const ImageRgba8& source, bool srgb,
+                                  VkCommandBuffer commandBuffer,
+                                  std::vector<Buffer>& staging)
     {
         const std::vector<ImageRgba8> levels = generateMipChain(source);
         const auto mipLevels = static_cast<std::uint32_t>(levels.size());
         const VkFormat format = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 
-        auto image = createImage(source.width, source.height, format,
-                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                                 mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
+        auto image =
+            createImage(source.width, source.height, format,
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                        mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
         if (!image)
         {
             return image.error();
@@ -1487,11 +1521,11 @@ namespace r4d::vulkan
                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                static_cast<std::uint32_t>(copies.size()), copies.data());
 
-        imageBarrier(commandBuffer, image.value().handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
-                     VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-                     VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
+        imageBarrier(
+            commandBuffer, image.value().handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
         staging.push_back(upload.value());
         return image.value();
@@ -1551,13 +1585,13 @@ namespace r4d::vulkan
         }
 
         const auto count = static_cast<std::uint32_t>(cloud.count());
-        const VkDeviceSize splatBytes = static_cast<VkDeviceSize>(count) * sizeof(Gaussian);
+        const VkDeviceSize splatBytes =
+            static_cast<VkDeviceSize>(count) * sizeof(Gaussian);
 
-        auto gaussianBuffer = createBuffer(splatBytes,
-                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                               VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                           "gaussian buffer");
+        auto gaussianBuffer = createBuffer(
+            splatBytes,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "gaussian buffer");
         if (!gaussianBuffer)
         {
             return gaussianBuffer.error();
@@ -1582,8 +1616,8 @@ namespace r4d::vulkan
         }
 
         VkBufferCopy copy{0, 0, splatBytes};
-        vkCmdCopyBuffer(commandBuffer.value(), staging.value().handle, m_gaussianBuffer.handle,
-                        1, &copy);
+        vkCmdCopyBuffer(commandBuffer.value(), staging.value().handle,
+                        m_gaussianBuffer.handle, 1, &copy);
 
         VkBufferMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
         barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
@@ -1615,11 +1649,13 @@ namespace r4d::vulkan
         // A starting guess only. How many pairs a view wants is decided by how
         // much screen the splats cover, not by how many there are, so the first
         // frame that wants more than this grows the buffers to what it measured.
-        m_pairCapacity = pairCapacityFor(static_cast<VkDeviceSize>(count) * kPairsPerSplat);
+        m_pairCapacity =
+            pairCapacityFor(static_cast<VkDeviceSize>(count) * kPairsPerSplat);
         m_pairTileCount = m_pairCapacity / kSortGroupSize;
 
         const auto createSortBuffer = [&](VkDeviceSize entries, const char* name,
-                                          Buffer& out) -> Status {
+                                          Buffer& out) -> Status
+        {
             auto buffer = createBuffer(entries * sizeof(std::uint32_t),
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, name);
@@ -1640,15 +1676,15 @@ namespace r4d::vulkan
                                      m_gaussianOrder[i]));
             R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort keys A", sort.keysA));
             R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort keys B", sort.keysB));
-            R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat sort values B",
-                                     sort.valuesB));
+            R4D_TRY(
+                createSortBuffer(m_sortPaddedCount, "splat sort values B", sort.valuesB));
             // The histogram and the pairs keep the place they had before they
             // became growable: a Vulkan allocation's position in this sequence
             // decides where it lands, and moving them to the end costs 0.5 ms
             // of tile sort.
             R4D_TRY(createPairBuffers(i));
-            R4D_TRY(createSortBuffer(kSortBuckets, "splat sort digit bases",
-                                     sort.digitBase));
+            R4D_TRY(
+                createSortBuffer(kSortBuckets, "splat sort digit bases", sort.digitBase));
 
             R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat tile counts",
                                      sort.tileCounts));
@@ -1668,17 +1704,17 @@ namespace r4d::vulkan
                 }
                 sort.groupSums = sums.value();
             }
-            R4D_TRY(createSortBuffer(kMaxTiles * 2, "splat tile ranges",
-                                     sort.tileRanges));
+            R4D_TRY(
+                createSortBuffer(kMaxTiles * 2, "splat tile ranges", sort.tileRanges));
 
             // The pair total, copied back so a view that wants more than the
             // buffers hold grows them instead of dropping the overflow.
             {
-                auto readback = createBuffer(sizeof(std::uint32_t),
-                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                             "splat pair total");
+                auto readback =
+                    createBuffer(sizeof(std::uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                 "splat pair total");
                 if (!readback)
                 {
                     return readback.error();
@@ -1688,16 +1724,15 @@ namespace r4d::vulkan
 
             // One projection per real splat; the sort's padding never reaches
             // the draw, so it needs none.
-            auto projections = createBuffer(
-                static_cast<VkDeviceSize>(count) * sizeof(SplatProjection),
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                "splat projections");
+            auto projections =
+                createBuffer(static_cast<VkDeviceSize>(count) * sizeof(SplatProjection),
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "splat projections");
             if (!projections)
             {
                 return projections.error();
             }
             sort.projections = projections.value();
-
         }
 
         // A pass's constants never change once the count is known, so the whole
@@ -1770,12 +1805,12 @@ namespace r4d::vulkan
     {
         // Digit-major, one row of per-tile counts per digit. The tile sort runs
         // over the pairs, which is the larger of the two.
-        const VkDeviceSize histogramEntries =
-            static_cast<VkDeviceSize>(kSortBuckets) *
-            std::max(m_sortTileCount, m_pairTileCount);
+        const VkDeviceSize histogramEntries = static_cast<VkDeviceSize>(kSortBuckets) *
+                                              std::max(m_sortTileCount, m_pairTileCount);
 
         const auto create = [&](VkDeviceSize entries, const char* name,
-                                Buffer& out) -> Status {
+                                Buffer& out) -> Status
+        {
             destroyBuffer(out);
             auto buffer = createBuffer(entries * sizeof(std::uint32_t),
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -1899,7 +1934,8 @@ namespace r4d::vulkan
         return Status::Ok();
     }
 
-    Status VulkanRenderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
+    Status
+    VulkanRenderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
     {
         // Binding numbers come from the register shifts the shaders are built
         // with, the same way the splat pass gets its t0 and t1.
@@ -1941,12 +1977,18 @@ namespace r4d::vulkan
 
         // Indexed by SortStage, so the order of these must match the enum.
         static constexpr std::string_view kStageShaders[] = {
-            "SplatCull.cs.spv",          "SplatSortHistogram.cs.spv",
-            "SplatSortScanRows.cs.spv",  "SplatSortScanTotals.cs.spv",
-            "SplatSortScatter.cs.spv",   "SplatBinCount.cs.spv",
-            "SplatScanGroups.cs.spv",    "SplatScanGroupSums.cs.spv",
-            "SplatScanAdd.cs.spv",       "SplatBin.cs.spv",
-            "SplatTileRangesReset.cs.spv", "SplatTileRanges.cs.spv",
+            "SplatCull.cs.spv",
+            "SplatSortHistogram.cs.spv",
+            "SplatSortScanRows.cs.spv",
+            "SplatSortScanTotals.cs.spv",
+            "SplatSortScatter.cs.spv",
+            "SplatBinCount.cs.spv",
+            "SplatScanGroups.cs.spv",
+            "SplatScanGroupSums.cs.spv",
+            "SplatScanAdd.cs.spv",
+            "SplatBin.cs.spv",
+            "SplatTileRangesReset.cs.spv",
+            "SplatTileRanges.cs.spv",
             "SplatRaster.cs.spv"};
         static_assert(std::size(kStageShaders) ==
                       static_cast<std::size_t>(SortStage::Count));
@@ -1967,9 +2009,8 @@ namespace r4d::vulkan
             info.stage.pName = "main";
             info.layout = m_sortPipelineLayout;
 
-            const VkResult result =
-                vkCreateComputePipelines(m_context.device, VK_NULL_HANDLE, 1, &info,
-                                         nullptr, &m_sortPipelines[i]);
+            const VkResult result = vkCreateComputePipelines(
+                m_context.device, VK_NULL_HANDLE, 1, &info, nullptr, &m_sortPipelines[i]);
             vkDestroyShaderModule(m_context.device, shaderModule.value(), nullptr);
             R4D_VK(result, "vkCreateComputePipelines (splat sort)");
         }
@@ -1987,7 +2028,8 @@ namespace r4d::vulkan
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kFramesInFlight * 2},
         };
 
-        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        VkDescriptorPoolCreateInfo poolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         poolInfo.maxSets = kFramesInFlight * 2;
         poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
         poolInfo.pPoolSizes = sizes;
@@ -2004,82 +2046,95 @@ namespace r4d::vulkan
         allocInfo.pSetLayouts = layouts.data();
         R4D_VK(vkAllocateDescriptorSets(m_context.device, &allocInfo, m_sortSets.data()),
                "vkAllocateDescriptorSets (splat sort)");
-        R4D_VK(vkAllocateDescriptorSets(m_context.device, &allocInfo,
-                                        m_tileSortSets.data()),
-               "vkAllocateDescriptorSets (splat tile sort)");
+        R4D_VK(
+            vkAllocateDescriptorSets(m_context.device, &allocInfo, m_tileSortSets.data()),
+            "vkAllocateDescriptorSets (splat tile sort)");
 
         for (std::uint32_t pass = 0; pass < 2; ++pass)
-        for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
-        {
-            const SortBuffers& sort = m_sortBuffers[i];
-            const VkDescriptorSet set = (pass == 0) ? m_sortSets[i] : m_tileSortSets[i];
-
-            // Must match the u0..u14 order in SplatSort.hlsli and SplatTiles.hlsli.
-            // The tile sort is the same kernels over the pairs, so its set puts
-            // the pair buffers where the depth keys and values usually sit.
-            const Buffer* const sortBuffers[kSortBufferCount] = {
-                (pass == 0) ? &sort.keysA : &sort.pairTileA,
-                (pass == 0) ? &sort.keysB : &sort.pairTileB,
-                (pass == 0) ? &m_gaussianOrder[i] : &sort.pairSplatA,
-                (pass == 0) ? &sort.valuesB : &sort.pairSplatB,
-                &sort.histogram,   &sort.digitBase,   &sort.projections,
-                &sort.tileCounts,  &sort.tileOffsets, &sort.groupSums,
-                &sort.pairTileA,   &sort.pairTileB,
-                &sort.pairSplatA,  &sort.pairSplatB,  &sort.tileRanges};
-
-            VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0,
-                                             sizeof(FrameConstants)};
-            VkDescriptorBufferInfo constantsInfo{m_sortConstants.handle, 0,
-                                                 sizeof(SortConstants)};
-            VkDescriptorBufferInfo gaussianInfo{m_gaussianBuffer.handle, 0, VK_WHOLE_SIZE};
-            std::array<VkDescriptorBufferInfo, kSortBufferCount> bufferInfos{};
-
-            std::vector<VkWriteDescriptorSet> writes;
-            const auto write = [&](std::uint32_t binding, VkDescriptorType type,
-                                   const VkDescriptorBufferInfo* buffer) {
-                VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-                entry.dstSet = set;
-                entry.dstBinding = binding;
-                entry.descriptorCount = 1;
-                entry.descriptorType = type;
-                entry.pBufferInfo = buffer;
-                writes.push_back(entry);
-            };
-
-            write(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &frameInfo);
-            write(kSortConstantsBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                  &constantsInfo);
-            write(kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &gaussianInfo);
-            for (std::uint32_t b = 0; b < kSortBufferCount; ++b)
+            for (std::uint32_t i = 0; i < kFramesInFlight; ++i)
             {
-                bufferInfos[b] = {sortBuffers[b]->handle, 0, VK_WHOLE_SIZE};
-                write(kSortBufferBinding + b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                      &bufferInfos[b]);
+                const SortBuffers& sort = m_sortBuffers[i];
+                const VkDescriptorSet set =
+                    (pass == 0) ? m_sortSets[i] : m_tileSortSets[i];
+
+                // Must match the u0..u14 order in SplatSort.hlsli and SplatTiles.hlsli.
+                // The tile sort is the same kernels over the pairs, so its set puts
+                // the pair buffers where the depth keys and values usually sit.
+                const Buffer* const sortBuffers[kSortBufferCount] = {
+                    (pass == 0) ? &sort.keysA : &sort.pairTileA,
+                    (pass == 0) ? &sort.keysB : &sort.pairTileB,
+                    (pass == 0) ? &m_gaussianOrder[i] : &sort.pairSplatA,
+                    (pass == 0) ? &sort.valuesB : &sort.pairSplatB,
+                    &sort.histogram,
+                    &sort.digitBase,
+                    &sort.projections,
+                    &sort.tileCounts,
+                    &sort.tileOffsets,
+                    &sort.groupSums,
+                    &sort.pairTileA,
+                    &sort.pairTileB,
+                    &sort.pairSplatA,
+                    &sort.pairSplatB,
+                    &sort.tileRanges};
+
+                VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0,
+                                                 sizeof(FrameConstants)};
+                VkDescriptorBufferInfo constantsInfo{m_sortConstants.handle, 0,
+                                                     sizeof(SortConstants)};
+                VkDescriptorBufferInfo gaussianInfo{m_gaussianBuffer.handle, 0,
+                                                    VK_WHOLE_SIZE};
+                std::array<VkDescriptorBufferInfo, kSortBufferCount> bufferInfos{};
+
+                std::vector<VkWriteDescriptorSet> writes;
+                const auto write = [&](std::uint32_t binding, VkDescriptorType type,
+                                       const VkDescriptorBufferInfo* buffer)
+                {
+                    VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                    entry.dstSet = set;
+                    entry.dstBinding = binding;
+                    entry.descriptorCount = 1;
+                    entry.descriptorType = type;
+                    entry.pBufferInfo = buffer;
+                    writes.push_back(entry);
+                };
+
+                write(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &frameInfo);
+                write(kSortConstantsBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                      &constantsInfo);
+                write(kGaussianBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &gaussianInfo);
+                for (std::uint32_t b = 0; b < kSortBufferCount; ++b)
+                {
+                    bufferInfos[b] = {sortBuffers[b]->handle, 0, VK_WHOLE_SIZE};
+                    write(kSortBufferBinding + b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                          &bufferInfos[b]);
+                }
+
+                // The rasteriser's two images. They outlive an upload but are
+                // recreated on resize, which rewrites these.
+                VkDescriptorImageInfo depthInfo{VK_NULL_HANDLE, m_depth.view,
+                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+                VkDescriptorImageInfo targetInfo{VK_NULL_HANDLE, m_splatColour.view,
+                                                 VK_IMAGE_LAYOUT_GENERAL};
+                const auto writeImage = [&](std::uint32_t binding, VkDescriptorType type,
+                                            const VkDescriptorImageInfo* image)
+                {
+                    VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                    entry.dstSet = set;
+                    entry.dstBinding = binding;
+                    entry.descriptorCount = 1;
+                    entry.descriptorType = type;
+                    entry.pImageInfo = image;
+                    writes.push_back(entry);
+                };
+                writeImage(kSplatDepthBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                           &depthInfo);
+                writeImage(kSplatTargetBinding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                           &targetInfo);
+
+                vkUpdateDescriptorSets(m_context.device,
+                                       static_cast<std::uint32_t>(writes.size()),
+                                       writes.data(), 0, nullptr);
             }
-
-            // The rasteriser's two images. They outlive an upload but are
-            // recreated on resize, which rewrites these.
-            VkDescriptorImageInfo depthInfo{VK_NULL_HANDLE, m_depth.view,
-                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-            VkDescriptorImageInfo targetInfo{VK_NULL_HANDLE, m_splatColour.view,
-                                             VK_IMAGE_LAYOUT_GENERAL};
-            const auto writeImage = [&](std::uint32_t binding, VkDescriptorType type,
-                                        const VkDescriptorImageInfo* image) {
-                VkWriteDescriptorSet entry{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-                entry.dstSet = set;
-                entry.dstBinding = binding;
-                entry.descriptorCount = 1;
-                entry.descriptorType = type;
-                entry.pImageInfo = image;
-                writes.push_back(entry);
-            };
-            writeImage(kSplatDepthBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &depthInfo);
-            writeImage(kSplatTargetBinding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &targetInfo);
-
-            vkUpdateDescriptorSets(m_context.device,
-                                   static_cast<std::uint32_t>(writes.size()),
-                                   writes.data(), 0, nullptr);
-        }
 
         return Status::Ok();
     }
@@ -2096,8 +2151,9 @@ namespace r4d::vulkan
         // has already waited on that frame's fence, so nothing here needs a
         // barrier against the previous frame's reads.
         const SortBuffers& sort = m_sortBuffers[frameIndex];
-        const auto dispatch = [&](SortStage stage, std::uint32_t section,
-                                  std::uint32_t groups) {
+        const auto dispatch =
+            [&](SortStage stage, std::uint32_t section, std::uint32_t groups)
+        {
             // Sections past the depth passes belong to the tile sort, which
             // reads the pair buffers through its own set.
             const bool tilePass = section >= kSortPasses;
@@ -2106,12 +2162,10 @@ namespace r4d::vulkan
                 static_cast<std::uint32_t>(section * m_sortConstantStride)};
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                               m_sortPipelines[static_cast<std::size_t>(stage)]);
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                    m_sortPipelineLayout, 0, 1,
-                                    tilePass ? &m_tileSortSets[frameIndex]
-                                             : &m_sortSets[frameIndex],
-                                    static_cast<std::uint32_t>(std::size(offsets)),
-                                    offsets);
+            vkCmdBindDescriptorSets(
+                commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_sortPipelineLayout, 0, 1,
+                tilePass ? &m_tileSortSets[frameIndex] : &m_sortSets[frameIndex],
+                static_cast<std::uint32_t>(std::size(offsets)), offsets);
             vkCmdDispatch(commandBuffer, groups, 1, 1);
             memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -2175,8 +2229,8 @@ namespace r4d::vulkan
         // exact demand even when this frame overflowed, because the counts it
         // sums are never clamped to the capacity.
         memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                      VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                      VK_ACCESS_2_TRANSFER_READ_BIT);
         VkBufferCopy region{};
         region.srcOffset =
             static_cast<VkDeviceSize>(m_sortTileCount) * sizeof(std::uint32_t);
@@ -2187,7 +2241,7 @@ namespace r4d::vulkan
     }
 
     void VulkanRenderer::rasteriseSplats(VkCommandBuffer commandBuffer,
-                                        std::uint32_t frameIndex)
+                                         std::uint32_t frameIndex)
     {
         if (m_gaussianCount == 0 || m_sortPipelineLayout == VK_NULL_HANDLE)
         {
@@ -2230,14 +2284,12 @@ namespace r4d::vulkan
                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-        imageBarrier(commandBuffer, m_depth.handle,
-                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                     VK_IMAGE_ASPECT_DEPTH_BIT);
+        imageBarrier(
+            commandBuffer, m_depth.handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
     }
 
     // The rasteriser's depth and colour views change on resize; the sets that
@@ -2258,7 +2310,8 @@ namespace r4d::vulkan
                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
         const auto write = [&](VkDescriptorSet set, std::uint32_t binding,
-                               VkDescriptorType type, const VkDescriptorImageInfo* image) {
+                               VkDescriptorType type, const VkDescriptorImageInfo* image)
+        {
             if (set == VK_NULL_HANDLE)
             {
                 return;
@@ -2280,8 +2333,8 @@ namespace r4d::vulkan
                   &storageInfo);
             write(m_tileSortSets[i], kSplatDepthBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
                   &depthInfo);
-            write(m_tileSortSets[i], kSplatTargetBinding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                  &storageInfo);
+            write(m_tileSortSets[i], kSplatTargetBinding,
+                  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &storageInfo);
             write(m_splatSets[i], kGaussianBinding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
                   &sampledInfo);
         }
@@ -2289,8 +2342,8 @@ namespace r4d::vulkan
         if (!writes.empty())
         {
             vkUpdateDescriptorSets(m_context.device,
-                                   static_cast<std::uint32_t>(writes.size()), writes.data(),
-                                   0, nullptr);
+                                   static_cast<std::uint32_t>(writes.size()),
+                                   writes.data(), 0, nullptr);
         }
     }
 
@@ -2300,7 +2353,8 @@ namespace r4d::vulkan
             {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kFramesInFlight},
         };
 
-        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        VkDescriptorPoolCreateInfo poolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         poolInfo.maxSets = kFramesInFlight;
         poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
         poolInfo.pPoolSizes = sizes;
@@ -2308,9 +2362,10 @@ namespace r4d::vulkan
                                       &m_splatDescriptorPool),
                "vkCreateDescriptorPool (splat)");
 
-        const std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{m_splatSetLayout,
-                                                                         m_splatSetLayout};
-        VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        const std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{
+            m_splatSetLayout, m_splatSetLayout};
+        VkDescriptorSetAllocateInfo allocInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         allocInfo.descriptorPool = m_splatDescriptorPool;
         allocInfo.descriptorSetCount = kFramesInFlight;
         allocInfo.pSetLayouts = layouts.data();
@@ -2348,7 +2403,8 @@ namespace r4d::vulkan
 
         // The tile rasteriser already composited the splats among themselves;
         // this puts that image over the mesh.
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_splatPipeline);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          m_splatPipeline);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_splatPipelineLayout, 0, 1, &m_splatSets[frameIndex], 0,
                                 nullptr);
@@ -2362,7 +2418,8 @@ namespace r4d::vulkan
     {
         if (model.empty() || model.vertices.empty() || model.indices.empty())
         {
-            return makeError(ErrorCode::InvalidArgument, "uploadModel called with no geometry");
+            return makeError(ErrorCode::InvalidArgument,
+                             "uploadModel called with no geometry");
         }
 
         waitForGpuIdle();
@@ -2384,20 +2441,20 @@ namespace r4d::vulkan
         const VkDeviceSize vertexBytes = model.vertices.size() * sizeof(Vertex);
         const VkDeviceSize indexBytes = model.indices.size() * sizeof(std::uint32_t);
 
-        auto vertexBuffer = createBuffer(vertexBytes,
-                                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vertex buffer");
+        auto vertexBuffer = createBuffer(
+            vertexBytes,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vertex buffer");
         if (!vertexBuffer)
         {
             return vertexBuffer.error();
         }
         m_vertexBuffer = vertexBuffer.value();
 
-        auto indexBuffer = createBuffer(indexBytes,
-                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "index buffer");
+        auto indexBuffer = createBuffer(
+            indexBytes,
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "index buffer");
         if (!indexBuffer)
         {
             return indexBuffer.error();
@@ -2449,20 +2506,27 @@ namespace r4d::vulkan
         flatNormal.rgba = {128, 128, 255, 255};
 
         auto whiteSrgb = createTexture(white, true, commandBuffer.value(), staging);
-        if (!whiteSrgb) return whiteSrgb.error();
+        if (!whiteSrgb)
+            return whiteSrgb.error();
         auto whiteLinear = createTexture(white, false, commandBuffer.value(), staging);
-        if (!whiteLinear) return whiteLinear.error();
-        auto normalDefault = createTexture(flatNormal, false, commandBuffer.value(), staging);
-        if (!normalDefault) return normalDefault.error();
+        if (!whiteLinear)
+            return whiteLinear.error();
+        auto normalDefault =
+            createTexture(flatNormal, false, commandBuffer.value(), staging);
+        if (!normalDefault)
+            return normalDefault.error();
 
         const ImageRgba8& skyImage =
             model.environment.image.empty() ? white : model.environment.image;
         const ImageRgba8& irradianceImage =
             model.irradiance.image.empty() ? white : model.irradiance.image;
         auto sky = createTexture(skyImage, true, commandBuffer.value(), staging);
-        if (!sky) return sky.error();
-        auto irradiance = createTexture(irradianceImage, true, commandBuffer.value(), staging);
-        if (!irradiance) return irradiance.error();
+        if (!sky)
+            return sky.error();
+        auto irradiance =
+            createTexture(irradianceImage, true, commandBuffer.value(), staging);
+        if (!irradiance)
+            return irradiance.error();
 
         m_textures.push_back(whiteSrgb.value());
         m_textures.push_back(whiteLinear.value());
@@ -2473,9 +2537,10 @@ namespace r4d::vulkan
         std::vector<Image> modelTextures;
         for (const TextureImage& source : model.textures)
         {
-            auto created = createTexture(source.image, source.srgb, commandBuffer.value(),
-                                         staging);
-            if (!created) return created.error();
+            auto created =
+                createTexture(source.image, source.srgb, commandBuffer.value(), staging);
+            if (!created)
+                return created.error();
             modelTextures.push_back(created.value());
             m_textures.push_back(created.value());
         }
@@ -2494,12 +2559,11 @@ namespace r4d::vulkan
         m_sceneBounds = model.bounds;
 
         // One uniform slot per material, written once.
-        auto materialBuffer = createBuffer(m_materialStride * std::max<std::size_t>(
-                                               model.materials.size(), 1),
-                                           VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                           "material uniforms");
+        auto materialBuffer = createBuffer(
+            m_materialStride * std::max<std::size_t>(model.materials.size(), 1),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            "material uniforms");
         if (!materialBuffer)
         {
             return materialBuffer.error();
@@ -2528,8 +2592,8 @@ namespace r4d::vulkan
 
     Status VulkanRenderer::createDescriptorSets(const Model& model)
     {
-        const auto materialCount = static_cast<std::uint32_t>(
-            std::max<std::size_t>(model.materials.size(), 1));
+        const auto materialCount =
+            static_cast<std::uint32_t>(std::max<std::size_t>(model.materials.size(), 1));
 
         const VkDescriptorPoolSize sizes[] = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, materialCount * 2},
@@ -2537,38 +2601,45 @@ namespace r4d::vulkan
             {VK_DESCRIPTOR_TYPE_SAMPLER, materialCount * 3},
         };
 
-        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        VkDescriptorPoolCreateInfo poolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         poolInfo.maxSets = materialCount;
         poolInfo.poolSizeCount = static_cast<std::uint32_t>(std::size(sizes));
         poolInfo.pPoolSizes = sizes;
-        R4D_VK(vkCreateDescriptorPool(m_context.device, &poolInfo, nullptr, &m_descriptorPool),
+        R4D_VK(vkCreateDescriptorPool(m_context.device, &poolInfo, nullptr,
+                                      &m_descriptorPool),
                "vkCreateDescriptorPool");
 
         std::vector<VkDescriptorSetLayout> layouts(materialCount, m_setLayout);
-        VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo allocInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         allocInfo.descriptorPool = m_descriptorPool;
         allocInfo.descriptorSetCount = materialCount;
         allocInfo.pSetLayouts = layouts.data();
 
         m_materialSets.assign(materialCount, VK_NULL_HANDLE);
-        R4D_VK(vkAllocateDescriptorSets(m_context.device, &allocInfo, m_materialSets.data()),
-               "vkAllocateDescriptorSets");
+        R4D_VK(
+            vkAllocateDescriptorSets(m_context.device, &allocInfo, m_materialSets.data()),
+            "vkAllocateDescriptorSets");
 
         for (std::uint32_t i = 0; i < materialCount; ++i)
         {
             const Material& material =
                 i < model.materials.size() ? model.materials[i] : model.materials.front();
 
-            const auto pick = [&](std::int32_t index, std::size_t fallback) -> VkImageView {
-                const std::size_t base = 5;   // defaults and environment occupy 0..4
-                if (index >= 0 && base + static_cast<std::size_t>(index) < m_textures.size())
+            const auto pick = [&](std::int32_t index, std::size_t fallback) -> VkImageView
+            {
+                const std::size_t base = 5; // defaults and environment occupy 0..4
+                if (index >= 0 &&
+                    base + static_cast<std::size_t>(index) < m_textures.size())
                 {
                     return m_textures[base + static_cast<std::size_t>(index)].view;
                 }
                 return m_textures[fallback].view;
             };
 
-            VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0, sizeof(FrameConstants)};
+            VkDescriptorBufferInfo frameInfo{m_frameUniforms.handle, 0,
+                                             sizeof(FrameConstants)};
             VkDescriptorBufferInfo materialInfo{m_materialUniforms.handle, 0,
                                                 sizeof(MaterialConstants)};
 
@@ -2576,8 +2647,8 @@ namespace r4d::vulkan
             images[0].imageView = pick(material.baseColourTexture, 0);
             images[1].imageView = pick(material.metallicRoughnessTexture, 1);
             images[2].imageView = pick(material.normalTexture, 2);
-            images[3].imageView = m_textures[3].view;   // environment
-            images[4].imageView = m_textures[4].view;   // irradiance
+            images[3].imageView = m_textures[3].view; // environment
+            images[4].imageView = m_textures[4].view; // irradiance
             images[5].imageView = m_shadowMap.view;
             images[6].imageView = pick(material.emissiveTexture, 0);
             for (VkDescriptorImageInfo& image : images)
@@ -2595,7 +2666,8 @@ namespace r4d::vulkan
             std::vector<VkWriteDescriptorSet> writes;
             const auto addWrite = [&](std::uint32_t binding, VkDescriptorType type,
                                       const VkDescriptorBufferInfo* buffer,
-                                      const VkDescriptorImageInfo* image) {
+                                      const VkDescriptorImageInfo* image)
+            {
                 VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
                 write.dstSet = m_materialSets[i];
                 write.dstBinding = binding;
@@ -2607,7 +2679,8 @@ namespace r4d::vulkan
             };
 
             addWrite(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &frameInfo, nullptr);
-            addWrite(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &materialInfo, nullptr);
+            addWrite(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, &materialInfo,
+                     nullptr);
             for (std::uint32_t t = 0; t < kTexturesPerMaterial; ++t)
             {
                 addWrite(kTextureBinding + t, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr,
@@ -2620,8 +2693,8 @@ namespace r4d::vulkan
                      &shadowSamplerInfo);
 
             vkUpdateDescriptorSets(m_context.device,
-                                   static_cast<std::uint32_t>(writes.size()), writes.data(),
-                                   0, nullptr);
+                                   static_cast<std::uint32_t>(writes.size()),
+                                   writes.data(), 0, nullptr);
         }
 
         return Status::Ok();
@@ -2645,7 +2718,8 @@ namespace r4d::vulkan
         }
         if (m_pipeline == VK_NULL_HANDLE)
         {
-            return makeError(ErrorCode::InvalidArgument, "renderFrame before initialisation");
+            return makeError(ErrorCode::InvalidArgument,
+                             "renderFrame before initialisation");
         }
 
         const std::uint32_t frameIndex =
@@ -2674,10 +2748,10 @@ namespace r4d::vulkan
         if (m_timestampPool != VK_NULL_HANDLE && m_timestampWritten[frameIndex])
         {
             std::uint64_t timestamps[2]{};
-            if (vkGetQueryPoolResults(m_context.device, m_timestampPool,
-                                      frameIndex * kQueriesPerSlot, kFrameQueries,
-                                      sizeof(timestamps), timestamps, sizeof(std::uint64_t),
-                                      VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
+            if (vkGetQueryPoolResults(
+                    m_context.device, m_timestampPool, frameIndex * kQueriesPerSlot,
+                    kFrameQueries, sizeof(timestamps), timestamps, sizeof(std::uint64_t),
+                    VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
                 timestamps[1] > timestamps[0])
             {
                 const double milliseconds =
@@ -2738,7 +2812,8 @@ namespace r4d::vulkan
             }
             if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR)
             {
-                return vulkanError(ErrorCode::ApiCallFailed, acquired, "vkAcquireNextImageKHR");
+                return vulkanError(ErrorCode::ApiCallFailed, acquired,
+                                   "vkAcquireNextImageKHR");
             }
         }
 
@@ -2747,15 +2822,16 @@ namespace r4d::vulkan
         const double cpuDelta = m_frameTimer.tick();
         const float timeSeconds =
             (m_fixedTimeStep > 0.0)
-                ? static_cast<float>(static_cast<double>(m_frameCounter) * m_fixedTimeStep)
+                ? static_cast<float>(static_cast<double>(m_frameCounter) *
+                                     m_fixedTimeStep)
                 : static_cast<float>(m_frameTimer.totalSeconds());
 
         FrameConstants constants{};
         constants.viewProjection = m_camera.projection * m_camera.view;
         constants.lightViewProjection = lightViewProjection();
         constants.view = m_camera.view;
-        constants.splatViewport = Vec2{static_cast<float>(m_size.x),
-                                       static_cast<float>(m_size.y)};
+        constants.splatViewport =
+            Vec2{static_cast<float>(m_size.x), static_cast<float>(m_size.y)};
         // Focal length in pixels, recovered from the projection, which is what
         // the covariance Jacobian needs.
         constants.splatFocal =
@@ -2766,7 +2842,7 @@ namespace r4d::vulkan
         constants.cameraPosition = m_camera.position;
         constants.timeSeconds = timeSeconds;
         constants.ambient = Vec3{m_settings.ambientIntensity, m_settings.ambientIntensity,
-                                     m_settings.ambientIntensity};
+                                 m_settings.ambientIntensity};
         constants.exposure = m_settings.exposure;
         constants.lights[0].direction = glm::normalize(Vec3{-0.4f, 0.8f, -0.45f});
         constants.lights[0].colour = Vec3{1.0f, 0.96f, 0.9f};
@@ -2786,7 +2862,8 @@ namespace r4d::vulkan
 
         VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        R4D_VK(vkBeginCommandBuffer(frame.commandBuffer, &beginInfo), "vkBeginCommandBuffer");
+        R4D_VK(vkBeginCommandBuffer(frame.commandBuffer, &beginInfo),
+               "vkBeginCommandBuffer");
 
         if (m_timestampPool != VK_NULL_HANDLE)
         {
@@ -2806,15 +2883,16 @@ namespace r4d::vulkan
         VkImage colourImage = currentColourImage();
 
         imageBarrier(frame.commandBuffer, colourImage,
-                     m_headless && m_hasRenderedFrame ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-                                                      : VK_IMAGE_LAYOUT_UNDEFINED,
-                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0,
-                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                     m_headless && m_hasRenderedFrame
+                         ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                         : VK_IMAGE_LAYOUT_UNDEFINED,
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE,
+                     0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 
         imageBarrier(frame.commandBuffer, m_depth.handle, VK_IMAGE_LAYOUT_UNDEFINED,
-                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0,
-                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE,
+                     0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                      VK_IMAGE_ASPECT_DEPTH_BIT);
 
@@ -2827,7 +2905,8 @@ namespace r4d::vulkan
         std::memcpy(colourAttachment.clearValue.color.float32, kClearColour,
                     sizeof(kClearColour));
 
-        VkRenderingAttachmentInfo depthAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        VkRenderingAttachmentInfo depthAttachment{
+            VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         depthAttachment.imageView = m_depth.view;
         depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -2843,13 +2922,15 @@ namespace r4d::vulkan
 
         vkCmdBeginRendering(frame.commandBuffer, &rendering);
 
-        VkViewport viewport{0.0f, 0.0f, static_cast<float>(m_size.x),
-                            static_cast<float>(m_size.y), 0.0f, 1.0f};
+        VkViewport viewport{
+            0.0f, 0.0f, static_cast<float>(m_size.x), static_cast<float>(m_size.y),
+            0.0f, 1.0f};
         vkCmdSetViewport(frame.commandBuffer, 0, 1, &viewport);
         VkRect2D scissor{{0, 0}, {m_size.x, m_size.y}};
         vkCmdSetScissor(frame.commandBuffer, 0, 1, &scissor);
 
-        vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+        vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          m_pipeline);
 
         std::uint32_t drawCalls = 0;
         std::uint32_t triangles = 0;
@@ -2865,15 +2946,16 @@ namespace r4d::vulkan
             for (const Primitive& primitive : m_primitives)
             {
                 const std::uint32_t materialIndex =
-                    primitive.materialIndex < m_materialSets.size() ? primitive.materialIndex
-                                                                    : 0;
+                    primitive.materialIndex < m_materialSets.size()
+                        ? primitive.materialIndex
+                        : 0;
                 const std::uint32_t offsets[2] = {
                     static_cast<std::uint32_t>(frameIndex * m_frameStride),
                     static_cast<std::uint32_t>(materialIndex * m_materialStride)};
 
-                vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                        m_pipelineLayout, 0, 1, &m_materialSets[materialIndex],
-                                        2, offsets);
+                vkCmdBindDescriptorSets(frame.commandBuffer,
+                                        VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
+                                        0, 1, &m_materialSets[materialIndex], 2, offsets);
 
                 vkCmdDrawIndexed(frame.commandBuffer, primitive.indexCount, 1,
                                  primitive.firstIndex,
@@ -2916,14 +2998,16 @@ namespace r4d::vulkan
 
         if (m_timestampPool != VK_NULL_HANDLE)
         {
-            vkCmdWriteTimestamp2(frame.commandBuffer, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                                 m_timestampPool, frameIndex * kQueriesPerSlot + 1);
+            vkCmdWriteTimestamp2(frame.commandBuffer,
+                                 VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, m_timestampPool,
+                                 frameIndex * kQueriesPerSlot + 1);
             m_timestampWritten[frameIndex] = true;
         }
 
         R4D_VK(vkEndCommandBuffer(frame.commandBuffer), "vkEndCommandBuffer");
 
-        VkCommandBufferSubmitInfo commandInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+        VkCommandBufferSubmitInfo commandInfo{
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
         commandInfo.commandBuffer = frame.commandBuffer;
 
         VkSemaphoreSubmitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
@@ -2946,7 +3030,8 @@ namespace r4d::vulkan
             submit.pSignalSemaphoreInfos = &signalInfo;
         }
 
-        R4D_VK(vkQueueSubmit2(m_context.queue, 1, &submit, frame.inFlight), "vkQueueSubmit2");
+        R4D_VK(vkQueueSubmit2(m_context.queue, 1, &submit, frame.inFlight),
+               "vkQueueSubmit2");
 
         if (!m_headless)
         {
@@ -2964,7 +3049,8 @@ namespace r4d::vulkan
             }
             else if (presented != VK_SUCCESS)
             {
-                return vulkanError(ErrorCode::ApiCallFailed, presented, "vkQueuePresentKHR");
+                return vulkanError(ErrorCode::ApiCallFailed, presented,
+                                   "vkQueuePresentKHR");
             }
         }
 
@@ -3091,8 +3177,8 @@ namespace r4d::vulkan
         copy.imageSubresource.layerCount = 1;
         copy.imageExtent = {m_size.x, m_size.y, 1};
         vkCmdCopyImageToBuffer(commandBuffer.value(), source,
-                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.value().handle,
-                               1, &copy);
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               readback.value().handle, 1, &copy);
 
         imageBarrier(commandBuffer.value(), source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                      resting, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
@@ -3108,7 +3194,8 @@ namespace r4d::vulkan
         capture.width = m_size.x;
         capture.height = m_size.y;
         capture.rgba.resize(capture.expectedBytes());
-        std::memcpy(capture.rgba.data(), readback.value().mapped, capture.expectedBytes());
+        std::memcpy(capture.rgba.data(), readback.value().mapped,
+                    capture.expectedBytes());
 
         destroyBuffer(readback.value());
         return capture;

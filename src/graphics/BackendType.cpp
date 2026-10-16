@@ -14,7 +14,8 @@ namespace r4d
         std::string lowered;
         lowered.reserve(name.size());
         std::transform(name.begin(), name.end(), std::back_inserter(lowered),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                       [](unsigned char c)
+                       { return static_cast<char>(std::tolower(c)); });
 
         if (lowered == "d3d12" || lowered == "dx12" || lowered == "directx12")
         {

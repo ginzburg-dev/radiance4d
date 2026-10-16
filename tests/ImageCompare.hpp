@@ -24,10 +24,9 @@ namespace r4d::testing
 
         double differingFraction() const
         {
-            return totalPixels == 0
-                       ? 0.0
-                       : static_cast<double>(differingPixels) /
-                             static_cast<double>(totalPixels);
+            return totalPixels == 0 ? 0.0
+                                    : static_cast<double>(differingPixels) /
+                                          static_cast<double>(totalPixels);
         }
     };
 
@@ -54,8 +53,7 @@ namespace r4d::testing
         }
 
         difference.comparable = true;
-        difference.totalPixels =
-            static_cast<std::uint64_t>(actual.width) * actual.height;
+        difference.totalPixels = static_cast<std::uint64_t>(actual.width) * actual.height;
 
         double squaredSum = 0.0;
         const std::size_t channels = actual.expectedBytes();
@@ -70,8 +68,8 @@ namespace r4d::testing
                 {
                     break;
                 }
-                const int delta = static_cast<int>(actual.rgba[i]) -
-                                  static_cast<int>(expected.rgba[i]);
+                const int delta =
+                    static_cast<int>(actual.rgba[i]) - static_cast<int>(expected.rgba[i]);
                 const std::uint32_t magnitude =
                     static_cast<std::uint32_t>(delta < 0 ? -delta : delta);
                 worstForPixel = std::max(worstForPixel, magnitude);

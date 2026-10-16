@@ -19,7 +19,8 @@ namespace r4d::d3d12
 
     // An empty selector means the highest-performance hardware adapter. Software
     // adapters are returned only when asked for by name.
-    Result<SelectedAdapter> selectAdapter(IDXGIFactory6* factory, const std::string& selector);
+    Result<SelectedAdapter> selectAdapter(IDXGIFactory6* factory,
+                                          const std::string& selector);
 
     GpuCapabilities queryCapabilities(ID3D12Device* device, IDXGIFactory5* factory);
 

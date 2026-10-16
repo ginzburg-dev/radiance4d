@@ -9,7 +9,8 @@
 #include <windows.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg,
-                                                             WPARAM wParam, LPARAM lParam);
+                                                             WPARAM wParam,
+                                                             LPARAM lParam);
 
 namespace r4d
 {
@@ -33,17 +34,19 @@ namespace r4d
         switch (message)
         {
             case WM_MOUSEMOVE:
-            case WM_LBUTTONDOWN: case WM_LBUTTONUP:
-            case WM_RBUTTONDOWN: case WM_RBUTTONUP:
-            case WM_MBUTTONDOWN: case WM_MBUTTONUP:
-            case WM_MOUSEWHEEL:
-                return io.WantCaptureMouse;
-            case WM_KEYDOWN: case WM_KEYUP:
-            case WM_SYSKEYDOWN: case WM_SYSKEYUP:
-            case WM_CHAR:
-                return io.WantCaptureKeyboard;
-            default:
-                return false;
+            case WM_LBUTTONDOWN:
+            case WM_LBUTTONUP:
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONUP:
+            case WM_MBUTTONDOWN:
+            case WM_MBUTTONUP:
+            case WM_MOUSEWHEEL: return io.WantCaptureMouse;
+            case WM_KEYDOWN:
+            case WM_KEYUP:
+            case WM_SYSKEYDOWN:
+            case WM_SYSKEYUP:
+            case WM_CHAR: return io.WantCaptureKeyboard;
+            default: return false;
         }
     }
 
@@ -54,7 +57,8 @@ namespace r4d
 
     bool debugUiWantsKeyboard()
     {
-        return ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
+        return ImGui::GetCurrentContext() != nullptr &&
+               ImGui::GetIO().WantCaptureKeyboard;
     }
 
     void drawStatsWindow(const GpuStats& stats, const AdapterInfo& adapter,
@@ -80,7 +84,8 @@ namespace r4d
         ImGui::TextUnformatted(adapter.name.c_str());
         ImGui::Separator();
 
-        ImGui::Text("CPU  %6.3f ms  (avg %6.3f)", stats.cpuFrameMs, stats.cpuFrameAverageMs);
+        ImGui::Text("CPU  %6.3f ms  (avg %6.3f)", stats.cpuFrameMs,
+                    stats.cpuFrameAverageMs);
         if (stats.gpuTimingsValid)
         {
             ImGui::Text("GPU  %6.3f ms  (avg %6.3f)", stats.gpuFrameMs,
@@ -97,8 +102,8 @@ namespace r4d
             for (std::size_t pass = 0; pass < kGpuPassCount; ++pass)
             {
                 const auto name = gpuPassName(static_cast<GpuPass>(pass));
-                ImGui::Text("  %-10s %6.3f ms  (avg %6.3f)", name,
-                            stats.gpuPassMs[pass], stats.gpuPassAverageMs[pass]);
+                ImGui::Text("  %-10s %6.3f ms  (avg %6.3f)", name, stats.gpuPassMs[pass],
+                            stats.gpuPassAverageMs[pass]);
                 splatTotal += stats.gpuPassAverageMs[pass];
             }
             ImGui::Text("  %-10s %6.3f ms  (avg)", "Splats", splatTotal);
@@ -116,8 +121,10 @@ namespace r4d
             ImGui::Text("Shader model   %s", capabilities.highestShaderModel.c_str());
             ImGui::Text("Enhanced barriers  %s",
                         capabilities.enhancedBarriersSupported ? "yes" : "no");
-            ImGui::Text("Ray tracing    %s", capabilities.rayTracingSupported ? "yes" : "no");
-            ImGui::Text("Mesh shaders   %s", capabilities.meshShadersSupported ? "yes" : "no");
+            ImGui::Text("Ray tracing    %s",
+                        capabilities.rayTracingSupported ? "yes" : "no");
+            ImGui::Text("Mesh shaders   %s",
+                        capabilities.meshShadersSupported ? "yes" : "no");
             ImGui::TextWrapped("%s", capabilities.runtimeDescription.c_str());
         }
 

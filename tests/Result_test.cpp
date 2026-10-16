@@ -7,7 +7,10 @@
 
 namespace
 {
-    r4d::Result<int> succeeds() { return 42; }
+    r4d::Result<int> succeeds()
+    {
+        return 42;
+    }
 
     r4d::Result<int> fails()
     {

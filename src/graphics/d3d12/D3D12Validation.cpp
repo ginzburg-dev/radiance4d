@@ -9,8 +9,7 @@ namespace r4d::d3d12
     {
         void CALLBACK messageCallback(D3D12_MESSAGE_CATEGORY /*category*/,
                                       D3D12_MESSAGE_SEVERITY severity,
-                                      D3D12_MESSAGE_ID /*id*/,
-                                      LPCSTR description,
+                                      D3D12_MESSAGE_ID /*id*/, LPCSTR description,
                                       void* context)
         {
             if (auto* sink = static_cast<ValidationSink*>(context); sink != nullptr)
@@ -23,16 +22,17 @@ namespace r4d::d3d12
         {
             switch (type)
             {
-                case D3D12_DRED_ALLOCATION_TYPE_COMMAND_QUEUE:    return "CommandQueue";
-                case D3D12_DRED_ALLOCATION_TYPE_COMMAND_ALLOCATOR: return "CommandAllocator";
-                case D3D12_DRED_ALLOCATION_TYPE_PIPELINE_STATE:   return "PipelineState";
-                case D3D12_DRED_ALLOCATION_TYPE_COMMAND_LIST:     return "CommandList";
-                case D3D12_DRED_ALLOCATION_TYPE_FENCE:            return "Fence";
-                case D3D12_DRED_ALLOCATION_TYPE_DESCRIPTOR_HEAP:  return "DescriptorHeap";
-                case D3D12_DRED_ALLOCATION_TYPE_HEAP:             return "Heap";
-                case D3D12_DRED_ALLOCATION_TYPE_QUERY_HEAP:       return "QueryHeap";
-                case D3D12_DRED_ALLOCATION_TYPE_RESOURCE:         return "Resource";
-                default:                                          return "Other";
+                case D3D12_DRED_ALLOCATION_TYPE_COMMAND_QUEUE: return "CommandQueue";
+                case D3D12_DRED_ALLOCATION_TYPE_COMMAND_ALLOCATOR:
+                    return "CommandAllocator";
+                case D3D12_DRED_ALLOCATION_TYPE_PIPELINE_STATE: return "PipelineState";
+                case D3D12_DRED_ALLOCATION_TYPE_COMMAND_LIST: return "CommandList";
+                case D3D12_DRED_ALLOCATION_TYPE_FENCE: return "Fence";
+                case D3D12_DRED_ALLOCATION_TYPE_DESCRIPTOR_HEAP: return "DescriptorHeap";
+                case D3D12_DRED_ALLOCATION_TYPE_HEAP: return "Heap";
+                case D3D12_DRED_ALLOCATION_TYPE_QUERY_HEAP: return "QueryHeap";
+                case D3D12_DRED_ALLOCATION_TYPE_RESOURCE: return "Resource";
+                default: return "Other";
             }
         }
     } // namespace
@@ -110,7 +110,8 @@ namespace r4d::d3d12
             &messageCallback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, this, &m_cookie);
         if (FAILED(hr))
         {
-            R4D_WARN("Validation: RegisterMessageCallback failed ({})", hresultToString(hr));
+            R4D_WARN("Validation: RegisterMessageCallback failed ({})",
+                     hresultToString(hr));
             m_cookie = 0;
             m_infoQueue.Reset();
             return;
@@ -129,7 +130,8 @@ namespace r4d::d3d12
         m_infoQueue.Reset();
     }
 
-    void ValidationSink::onMessage(D3D12_MESSAGE_SEVERITY severity, const char* description)
+    void ValidationSink::onMessage(D3D12_MESSAGE_SEVERITY severity,
+                                   const char* description)
     {
         const char* text = (description != nullptr) ? description : "(no description)";
 
@@ -147,13 +149,9 @@ namespace r4d::d3d12
                 m_warningCount.fetch_add(1);
                 R4D_WARN("D3D12 WARNING: {}", text);
                 break;
-            case D3D12_MESSAGE_SEVERITY_INFO:
-                R4D_DEBUG("D3D12 INFO: {}", text);
-                break;
+            case D3D12_MESSAGE_SEVERITY_INFO: R4D_DEBUG("D3D12 INFO: {}", text); break;
             case D3D12_MESSAGE_SEVERITY_MESSAGE:
-            default:
-                R4D_TRACE("D3D12: {}", text);
-                break;
+            default: R4D_TRACE("D3D12: {}", text); break;
         }
     }
 
@@ -181,14 +179,16 @@ namespace r4d::d3d12
             int nodeIndex = 0;
             while (node != nullptr && nodeIndex < 8)
             {
-                const UINT32 completed =
-                    (node->pLastBreadcrumbValue != nullptr) ? *node->pLastBreadcrumbValue : 0;
-                R4D_ERROR("DRED breadcrumb node {}: queue='{}' list='{}' "
-                          "{} of {} operations completed",
-                          nodeIndex,
-                          node->pCommandQueueDebugNameA ? node->pCommandQueueDebugNameA : "?",
-                          node->pCommandListDebugNameA ? node->pCommandListDebugNameA : "?",
-                          completed, node->BreadcrumbCount);
+                const UINT32 completed = (node->pLastBreadcrumbValue != nullptr)
+                                             ? *node->pLastBreadcrumbValue
+                                             : 0;
+                R4D_ERROR(
+                    "DRED breadcrumb node {}: queue='{}' list='{}' "
+                    "{} of {} operations completed",
+                    nodeIndex,
+                    node->pCommandQueueDebugNameA ? node->pCommandQueueDebugNameA : "?",
+                    node->pCommandListDebugNameA ? node->pCommandListDebugNameA : "?",
+                    completed, node->BreadcrumbCount);
                 node = node->pNext;
                 ++nodeIndex;
             }
@@ -199,14 +199,16 @@ namespace r4d::d3d12
         {
             R4D_ERROR("DRED page fault at GPU VA 0x{:016X}",
                       static_cast<std::uint64_t>(pageFault.PageFaultVA));
-            for (const D3D12_DRED_ALLOCATION_NODE1* node = pageFault.pHeadExistingAllocationNode;
+            for (const D3D12_DRED_ALLOCATION_NODE1* node =
+                     pageFault.pHeadExistingAllocationNode;
                  node != nullptr; node = node->pNext)
             {
                 R4D_ERROR("DRED   existing allocation: {} ({})",
                           node->ObjectNameA ? node->ObjectNameA : "?",
                           dredAllocationTypeName(node->AllocationType));
             }
-            for (const D3D12_DRED_ALLOCATION_NODE1* node = pageFault.pHeadRecentFreedAllocationNode;
+            for (const D3D12_DRED_ALLOCATION_NODE1* node =
+                     pageFault.pHeadRecentFreedAllocationNode;
                  node != nullptr; node = node->pNext)
             {
                 R4D_ERROR("DRED   recently freed: {} ({})",
@@ -228,15 +230,15 @@ namespace r4d::d3d12
         // The report writes into the DXGI info queue; drain it so the output
         // reaches our log and not just an attached debugger.
         ComPtr<IDXGIInfoQueue> infoQueue;
-        const bool haveQueue = SUCCEEDED(::DXGIGetDebugInterface1(0, IID_PPV_ARGS(&infoQueue)));
+        const bool haveQueue =
+            SUCCEEDED(::DXGIGetDebugInterface1(0, IID_PPV_ARGS(&infoQueue)));
         const UINT64 before =
             haveQueue ? infoQueue->GetNumStoredMessages(DXGI_DEBUG_ALL) : 0;
 
-        dxgiDebug->ReportLiveObjects(
-            DXGI_DEBUG_ALL,
-            static_cast<DXGI_DEBUG_RLO_FLAGS>(DXGI_DEBUG_RLO_SUMMARY |
-                                              DXGI_DEBUG_RLO_DETAIL |
-                                              DXGI_DEBUG_RLO_IGNORE_INTERNAL));
+        dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL,
+                                     static_cast<DXGI_DEBUG_RLO_FLAGS>(
+                                         DXGI_DEBUG_RLO_SUMMARY | DXGI_DEBUG_RLO_DETAIL |
+                                         DXGI_DEBUG_RLO_IGNORE_INTERNAL));
 
         if (!haveQueue)
         {

@@ -168,9 +168,9 @@ namespace r4d::vulkan
         Result<Buffer> createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                                     VkMemoryPropertyFlags properties, const char* name);
         void destroyBuffer(Buffer& buffer);
-        Result<Image> createImage(std::uint32_t width, std::uint32_t height, VkFormat format,
-                                  VkImageUsageFlags usage, std::uint32_t mipLevels,
-                                  VkImageAspectFlags aspect);
+        Result<Image> createImage(std::uint32_t width, std::uint32_t height,
+                                  VkFormat format, VkImageUsageFlags usage,
+                                  std::uint32_t mipLevels, VkImageAspectFlags aspect);
         void destroyImage(Image& image);
         Result<Image> createTexture(const ImageRgba8& source, bool srgb,
                                     VkCommandBuffer commandBuffer,

@@ -27,14 +27,14 @@ namespace r4d
     {
         switch (code)
         {
-            case ErrorCode::Unknown:              return "Unknown";
-            case ErrorCode::InvalidArgument:      return "InvalidArgument";
-            case ErrorCode::NotFound:             return "NotFound";
-            case ErrorCode::IoFailure:            return "IoFailure";
-            case ErrorCode::UnsupportedFeature:   return "UnsupportedFeature";
+            case ErrorCode::Unknown: return "Unknown";
+            case ErrorCode::InvalidArgument: return "InvalidArgument";
+            case ErrorCode::NotFound: return "NotFound";
+            case ErrorCode::IoFailure: return "IoFailure";
+            case ErrorCode::UnsupportedFeature: return "UnsupportedFeature";
             case ErrorCode::DeviceCreationFailed: return "DeviceCreationFailed";
-            case ErrorCode::ApiCallFailed:        return "ApiCallFailed";
-            case ErrorCode::ShaderLoadFailed:     return "ShaderLoadFailed";
+            case ErrorCode::ApiCallFailed: return "ApiCallFailed";
+            case ErrorCode::ShaderLoadFailed: return "ShaderLoadFailed";
         }
         return "Unknown";
     }
@@ -69,7 +69,7 @@ namespace r4d
         std::optional<Error> m_error;
     };
 
-    template <typename T>
+    template<typename T>
     class [[nodiscard]] Result
     {
     public:
@@ -109,8 +109,10 @@ namespace r4d
 
 } // namespace r4d
 
-#define R4D_TRY(expr)                                   \
-    do {                                                \
-        auto _r4d_status = (expr);                      \
-        if (!_r4d_status) return _r4d_status.error();   \
+#define R4D_TRY(expr)                                                                    \
+    do                                                                                   \
+    {                                                                                    \
+        auto _r4d_status = (expr);                                                       \
+        if (!_r4d_status)                                                                \
+            return _r4d_status.error();                                                  \
     } while (false)

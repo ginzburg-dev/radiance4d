@@ -9,7 +9,7 @@ namespace r4d
 
     // Averages only the samples actually added, so a partially filled window is
     // not diluted by its initial zeros.
-    template <std::size_t Capacity>
+    template<std::size_t Capacity>
     class RollingAverage
     {
         static_assert(Capacity > 0);

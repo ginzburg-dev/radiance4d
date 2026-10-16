@@ -67,8 +67,8 @@ namespace
         r4d::Camera camera;
         camera.focusOn(model.bounds.centre(), model.bounds.radius());
         camera.setAspect(static_cast<float>(width) / static_cast<float>(height));
-        gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(),
-                                        camera.position()});
+        gpu.setCamera(
+            r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
 
         for (int i = 0; i < frames; ++i)
         {
@@ -171,8 +171,7 @@ TEST_F(HeadlessRender, MovingTheCameraChangesTheImage)
 {
     // The scene is static, so this is what keeps the reproducibility check above
     // from passing trivially on a blank frame.
-    auto renderer =
-        r4d::createRenderer(r4d::BackendType::D3D12, headlessWarpDesc());
+    auto renderer = r4d::createRenderer(r4d::BackendType::D3D12, headlessWarpDesc());
     ASSERT_TRUE(renderer.ok()) << renderer.error().ToString();
     auto& gpu = *renderer.value();
 
@@ -183,7 +182,8 @@ TEST_F(HeadlessRender, MovingTheCameraChangesTheImage)
     camera.setAspect(static_cast<float>(kWidth) / static_cast<float>(kHeight));
     camera.focusOn(model.bounds.centre(), model.bounds.radius());
 
-    gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
+    gpu.setCamera(
+        r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
     ASSERT_TRUE(gpu.renderFrame().ok());
     auto first = gpu.captureFrame();
     ASSERT_TRUE(first.ok()) << first.error().ToString();
@@ -194,7 +194,8 @@ TEST_F(HeadlessRender, MovingTheCameraChangesTheImage)
     input.setMousePosition(r4d::Vec2{140.0f, 40.0f});
     camera.update(input, 1.0 / 60.0);
 
-    gpu.setCamera(r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
+    gpu.setCamera(
+        r4d::CameraParams{camera.view(), camera.projection(), camera.position()});
     ASSERT_TRUE(gpu.renderFrame().ok());
     auto second = gpu.captureFrame();
     ASSERT_TRUE(second.ok()) << second.error().ToString();
@@ -244,8 +245,8 @@ TEST_F(HeadlessRender, MatchesTheStoredWarpReference)
     const auto difference = r4d::testing::compareImages(capture.value(), expected.value(),
                                                         kPerPixelTolerance);
 
-    if (!difference.comparable || difference.maxChannelDelta > 4 || difference.rmse > 1.0 ||
-        difference.differingFraction() > 0.001)
+    if (!difference.comparable || difference.maxChannelDelta > 4 ||
+        difference.rmse > 1.0 || difference.differingFraction() > 0.001)
     {
         r4d::testing::writeFailureArtefacts(reference, capture.value(), expected.value());
         FAIL() << "render differs from the stored WARP reference: " << difference.message

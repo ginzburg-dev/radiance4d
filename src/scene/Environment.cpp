@@ -33,7 +33,8 @@ namespace r4d
             // A soft sun rather than a hard disc. A near-singular gradient makes
             // mirror reflections alias, and it amplifies sub-texel filtering
             // differences between the two backends into visible divergence.
-            const float cosAngle = glm::clamp(glm::dot(direction, sunDirection), -1.0f, 1.0f);
+            const float cosAngle =
+                glm::clamp(glm::dot(direction, sunDirection), -1.0f, 1.0f);
             const float glow = std::pow(std::max(cosAngle, 0.0f), 24.0f);
             const float core = std::pow(std::max(cosAngle, 0.0f), 220.0f);
             colour += Vec3{1.0f, 0.93f, 0.82f} * glow * 1.1f;
@@ -47,7 +48,8 @@ namespace r4d
             const float phi = (u - 0.5f) * 2.0f * kPi;
             const float theta = v * kPi;
             const float sinTheta = std::sin(theta);
-            return Vec3{sinTheta * std::cos(phi), std::cos(theta), sinTheta * std::sin(phi)};
+            return Vec3{sinTheta * std::cos(phi), std::cos(theta),
+                        sinTheta * std::sin(phi)};
         }
 
         std::uint8_t encode(float linear)
@@ -56,7 +58,8 @@ namespace r4d
             // and would otherwise clip to a flat white disc.
             const float mapped = linear / (1.0f + linear);
             const float srgb = std::pow(glm::clamp(mapped, 0.0f, 1.0f), 1.0f / 2.2f);
-            return static_cast<std::uint8_t>(glm::clamp(srgb * 255.0f + 0.5f, 0.0f, 255.0f));
+            return static_cast<std::uint8_t>(
+                glm::clamp(srgb * 255.0f + 0.5f, 0.0f, 255.0f));
         }
     } // namespace
 
@@ -75,7 +78,8 @@ namespace r4d
             const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(height);
             for (std::uint32_t x = 0; x < width; ++x)
             {
-                const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
+                const float u =
+                    (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
                 const Vec3 colour = skyRadiance(equirectDirection(u, v), sunDirection);
                 const std::size_t i = (static_cast<std::size_t>(y) * width + x) * 4;
                 texture.image.rgba[i + 0] = encode(colour.x);
@@ -107,8 +111,8 @@ namespace r4d
 
         for (std::uint32_t t = 0; t < kSamplesTheta; ++t)
         {
-            const float theta = (static_cast<float>(t) + 0.5f) /
-                                static_cast<float>(kSamplesTheta) * kPi;
+            const float theta =
+                (static_cast<float>(t) + 0.5f) / static_cast<float>(kSamplesTheta) * kPi;
             const float sinTheta = std::sin(theta);
             for (std::uint32_t p = 0; p < kSamplesPhi; ++p)
             {
@@ -117,7 +121,8 @@ namespace r4d
                                   kPi;
                 const Vec3 direction{sinTheta * std::cos(phi), std::cos(theta),
                                      sinTheta * std::sin(phi)};
-                samples.push_back({direction, skyRadiance(direction, sunDirection), sinTheta});
+                samples.push_back(
+                    {direction, skyRadiance(direction, sunDirection), sinTheta});
             }
         }
 
@@ -134,7 +139,8 @@ namespace r4d
             const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(height);
             for (std::uint32_t x = 0; x < width; ++x)
             {
-                const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
+                const float u =
+                    (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
                 const Vec3 normal = equirectDirection(u, v);
 
                 Vec3 total{0.0f};
@@ -146,7 +152,7 @@ namespace r4d
                         total += sample.radiance * cosine * sample.weight * solidAngle;
                     }
                 }
-                total /= kPi;   // Lambert
+                total /= kPi; // Lambert
 
                 const std::size_t i = (static_cast<std::size_t>(y) * width + x) * 4;
                 texture.image.rgba[i + 0] = encode(total.x);

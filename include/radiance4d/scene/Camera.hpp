@@ -19,7 +19,7 @@ namespace r4d
     {
         switch (mode)
         {
-            case CameraMode::Orbit:   return "Orbit";
+            case CameraMode::Orbit: return "Orbit";
             case CameraMode::FreeFly: return "FreeFly";
         }
         return "Unknown";

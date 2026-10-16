@@ -21,7 +21,8 @@ namespace r4d::d3d12
     class D3D12Profiler
     {
     public:
-        Status initialise(ID3D12Device* device, ID3D12CommandQueue* queue, UINT frameSlots);
+        Status initialise(ID3D12Device* device, ID3D12CommandQueue* queue,
+                          UINT frameSlots);
 
         // Off leaves the frame pair alone, which is how the cost of the per-pass
         // timestamps is measured.
@@ -55,8 +56,7 @@ namespace r4d::d3d12
 
         static UINT passQueryIndex(UINT slot, GpuPass pass)
         {
-            return slot * kQueriesPerSlot + kFrameQueries +
-                   2 * static_cast<UINT>(pass);
+            return slot * kQueriesPerSlot + kFrameQueries + 2 * static_cast<UINT>(pass);
         }
 
         // Reads the pair starting at firstQuery out of the readback buffer.

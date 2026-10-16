@@ -58,7 +58,8 @@ namespace r4d::d3d12
         constexpr UINT kTexturesPerMaterial = 7;
 
         static_assert(sizeof(MaterialConstants) % sizeof(UINT32) == 0);
-        constexpr UINT kMaterialRootConstants = sizeof(MaterialConstants) / sizeof(UINT32);
+        constexpr UINT kMaterialRootConstants =
+            sizeof(MaterialConstants) / sizeof(UINT32);
 
         constexpr UINT64 kConstantBufferAlignment = 256;
 
@@ -124,7 +125,6 @@ namespace r4d::d3d12
             float padding;
         };
         static_assert(sizeof(SplatProjection) == 48);
-
 
         // Must match the optimised clear value the render target is created with.
         constexpr float kClearColour[4] = {0.043f, 0.047f, 0.063f, 1.0f};
@@ -359,7 +359,8 @@ namespace r4d::d3d12
 
         if (m_headless)
         {
-            R4D_INFO("Renderer: headless -- no swapchain, rendering to an offscreen target");
+            R4D_INFO(
+                "Renderer: headless -- no swapchain, rendering to an offscreen target");
             R4D_TRY(createOffscreenTarget(m_size));
         }
         else
@@ -447,8 +448,10 @@ namespace r4d::d3d12
         info.RTVFormat = kBackBufferFormat;
         info.DSVFormat = kDepthFormat;
         info.SrvDescriptorHeap = m_uiHeap.Get();
-        info.LegacySingleSrvCpuDescriptor = m_uiHeap->GetCPUDescriptorHandleForHeapStart();
-        info.LegacySingleSrvGpuDescriptor = m_uiHeap->GetGPUDescriptorHandleForHeapStart();
+        info.LegacySingleSrvCpuDescriptor =
+            m_uiHeap->GetCPUDescriptorHandleForHeapStart();
+        info.LegacySingleSrvGpuDescriptor =
+            m_uiHeap->GetGPUDescriptorHandleForHeapStart();
 
         if (!ImGui_ImplDX12_Init(&info))
         {
@@ -541,10 +544,10 @@ namespace r4d::d3d12
         clear.DepthStencil.Depth = kClearDepth;
 
         const auto heap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-        R4D_HR(m_device->CreateCommittedResource3(&heap, D3D12_HEAP_FLAG_NONE, &desc,
-                                                  D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
-                                                  &clear, nullptr, 0, nullptr,
-                                                  IID_PPV_ARGS(&m_depthBuffer)),
+        R4D_HR(m_device->CreateCommittedResource3(
+                   &heap, D3D12_HEAP_FLAG_NONE, &desc,
+                   D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE, &clear, nullptr, 0, nullptr,
+                   IID_PPV_ARGS(&m_depthBuffer)),
                "CreateCommittedResource3 (depth buffer)");
         m_depthBuffer->SetName(L"Radiance4D Depth Buffer");
 
@@ -586,7 +589,8 @@ namespace r4d::d3d12
         m_shadowMap->SetName(L"Radiance4D Shadow Map");
 
         D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-        dsv.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+        dsv.ptr +=
+            m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 
         D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
         dsvDesc.Format = kDepthFormat;
@@ -600,8 +604,8 @@ namespace r4d::d3d12
         // Orthographic box fitted to the scene bounds along the key light.
         const Vec3 direction = glm::normalize(Vec3{-0.4f, 0.8f, -0.45f});
         const Vec3 centre = m_sceneBounds.valid() ? m_sceneBounds.centre() : Vec3{0.0f};
-        const float radius = m_sceneBounds.valid() ? std::max(m_sceneBounds.radius(), 0.01f)
-                                                   : 1.0f;
+        const float radius =
+            m_sceneBounds.valid() ? std::max(m_sceneBounds.radius(), 0.01f) : 1.0f;
 
         const Vec3 eye = centre + direction * (radius * 2.0f);
         const Vec3 up = std::abs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f}
@@ -619,23 +623,28 @@ namespace r4d::d3d12
             return;
         }
 
-        submitTextureBarrier(
-            m_commandList.Get(),
-            textureBarrier(m_shadowMap.Get(), D3D12_BARRIER_SYNC_NONE,
-                           D3D12_BARRIER_SYNC_DEPTH_STENCIL, D3D12_BARRIER_ACCESS_NO_ACCESS,
-                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
-                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
-                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE));
+        submitTextureBarrier(m_commandList.Get(),
+                             textureBarrier(m_shadowMap.Get(), D3D12_BARRIER_SYNC_NONE,
+                                            D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+                                            D3D12_BARRIER_ACCESS_NO_ACCESS,
+                                            D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                                            D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                                            D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE));
 
         D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-        dsv.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+        dsv.ptr +=
+            m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 
         m_commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-        m_commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, kClearDepth, 0, 0,
-                                             nullptr);
+        m_commandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, kClearDepth, 0,
+                                             0, nullptr);
 
-        D3D12_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(kShadowMapSize),
-                                static_cast<float>(kShadowMapSize), 0.0f, 1.0f};
+        D3D12_VIEWPORT viewport{0.0f,
+                                0.0f,
+                                static_cast<float>(kShadowMapSize),
+                                static_cast<float>(kShadowMapSize),
+                                0.0f,
+                                1.0f};
         m_commandList->RSSetViewports(1, &viewport);
         D3D12_RECT scissor{0, 0, static_cast<LONG>(kShadowMapSize),
                            static_cast<LONG>(kShadowMapSize)};
@@ -648,21 +657,22 @@ namespace r4d::d3d12
 
         for (const Primitive& primitive : m_primitives)
         {
-            m_commandList->DrawIndexedInstanced(primitive.indexCount, 1, primitive.firstIndex,
-                                                primitive.vertexOffset, 0);
+            m_commandList->DrawIndexedInstanced(
+                primitive.indexCount, 1, primitive.firstIndex, primitive.vertexOffset, 0);
         }
 
-        submitTextureBarrier(
-            m_commandList.Get(),
-            textureBarrier(m_shadowMap.Get(), D3D12_BARRIER_SYNC_DEPTH_STENCIL,
-                           D3D12_BARRIER_SYNC_PIXEL_SHADING,
-                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
-                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
-                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
+        submitTextureBarrier(m_commandList.Get(),
+                             textureBarrier(m_shadowMap.Get(),
+                                            D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+                                            D3D12_BARRIER_SYNC_PIXEL_SHADING,
+                                            D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                                            D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                                            D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
+                                            D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
     }
 
-    Status D3D12Renderer::createShadowPipeline(const std::filesystem::path& shaderDirectory)
+    Status
+    D3D12Renderer::createShadowPipeline(const std::filesystem::path& shaderDirectory)
     {
         auto vertexShader = loadShaderBlob(shaderDirectory, "Shadow.vs.dxil");
         if (!vertexShader)
@@ -718,7 +728,7 @@ namespace r4d::d3d12
         desc.Height = size.y;
         desc.DepthOrArraySize = 1;
         desc.MipLevels = 1;
-        desc.Format = kBackBufferFormat;   // same format as the swapchain path
+        desc.Format = kBackBufferFormat; // same format as the swapchain path
         desc.SampleDesc.Count = 1;
         desc.SampleDesc.Quality = 0;
         desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -782,7 +792,7 @@ namespace r4d::d3d12
         {
             D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
             heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-            heapDesc.NumDescriptors = 3;   // depth SRV, colour UAV, colour SRV
+            heapDesc.NumDescriptors = 3; // depth SRV, colour UAV, colour SRV
             heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
             R4D_HR(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_splatHeap)),
                    "CreateDescriptorHeap (splat)");
@@ -820,11 +830,12 @@ namespace r4d::d3d12
 
     ID3D12Resource* D3D12Renderer::currentRenderTarget(UINT backBufferIndex) const
     {
-        return m_headless ? m_offscreenTarget.Get() : m_backBuffers[backBufferIndex].Get();
+        return m_headless ? m_offscreenTarget.Get()
+                          : m_backBuffers[backBufferIndex].Get();
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE D3D12Renderer::currentRenderTargetView(
-        UINT backBufferIndex) const
+    D3D12_CPU_DESCRIPTOR_HANDLE
+    D3D12Renderer::currentRenderTargetView(UINT backBufferIndex) const
     {
         D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
         if (!m_headless)
@@ -888,12 +899,13 @@ namespace r4d::d3d12
         {
             return makeError(
                 ErrorCode::UnsupportedFeature,
-                std::format("this device/runtime does not report Enhanced Barriers "
-                            "support (D3D12_FEATURE_D3D12_OPTIONS12."
-                            "EnhancedBarriersSupported is FALSE). Adapter: {}. Runtime: {}. "
-                            "Radiance4D requires Enhanced Barriers; falling back to legacy "
-                            "barriers is a design decision that has not been taken.",
-                            m_adapterInfo.name, m_capabilities.runtimeDescription));
+                std::format(
+                    "this device/runtime does not report Enhanced Barriers "
+                    "support (D3D12_FEATURE_D3D12_OPTIONS12."
+                    "EnhancedBarriersSupported is FALSE). Adapter: {}. Runtime: {}. "
+                    "Radiance4D requires Enhanced Barriers; falling back to legacy "
+                    "barriers is a design decision that has not been taken.",
+                    m_adapterInfo.name, m_capabilities.runtimeDescription));
         }
         m_allowTearing = m_capabilities.tearingSupported;
 
@@ -918,7 +930,7 @@ namespace r4d::d3d12
         desc.Height = (size.y > 0) ? size.y : 1;
         desc.Format = kBackBufferFormat;
         desc.Stereo = FALSE;
-        desc.SampleDesc.Count = 1;   // the flip model forbids multisampled swapchains
+        desc.SampleDesc.Count = 1; // the flip model forbids multisampled swapchains
         desc.SampleDesc.Quality = 0;
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         desc.BufferCount = kBackBufferCount;
@@ -957,14 +969,15 @@ namespace r4d::d3d12
         {
             m_size = UVec2{actual.Width, actual.Height};
         }
-        R4D_INFO("Swapchain: {}x{}, {} buffers, flip-discard, tearing {}",
-                 m_size.x, m_size.y, kBackBufferCount, m_allowTearing ? "allowed" : "off");
+        R4D_INFO("Swapchain: {}x{}, {} buffers, flip-discard, tearing {}", m_size.x,
+                 m_size.y, kBackBufferCount, m_allowTearing ? "allowed" : "off");
         return Status::Ok();
     }
 
     Status D3D12Renderer::acquireBackBuffers()
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        D3D12_CPU_DESCRIPTOR_HANDLE handle =
+            m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
         for (UINT i = 0; i < kBackBufferCount; ++i)
         {
             R4D_HR(m_swapChain->GetBuffer(i, IID_PPV_ARGS(&m_backBuffers[i])),
@@ -998,9 +1011,10 @@ namespace r4d::d3d12
         {
             auto& frame = m_frames[i];
 
-            R4D_HR(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                    IID_PPV_ARGS(&frame.commandAllocator)),
-                   "ID3D12Device::CreateCommandAllocator");
+            R4D_HR(
+                m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                 IID_PPV_ARGS(&frame.commandAllocator)),
+                "ID3D12Device::CreateCommandAllocator");
             const std::wstring allocatorName =
                 L"Radiance4D Command Allocator (frame slot " + std::to_wstring(i) + L")";
             frame.commandAllocator->SetName(allocatorName.c_str());
@@ -1018,7 +1032,7 @@ namespace r4d::d3d12
             frame.constantBuffer->SetName(cbName.c_str());
 
             void* mapped = nullptr;
-            const D3D12_RANGE noRead{0, 0};   // write-only from the CPU
+            const D3D12_RANGE noRead{0, 0}; // write-only from the CPU
             R4D_HR(frame.constantBuffer->Map(0, &noRead, &mapped),
                    "ID3D12Resource::Map (frame constant buffer)");
             frame.constantBufferCpu = static_cast<std::byte*>(mapped);
@@ -1048,8 +1062,9 @@ namespace r4d::d3d12
         return Status::Ok();
     }
 
-    Result<std::vector<std::byte>> D3D12Renderer::loadShaderBlob(
-        const std::filesystem::path& shaderDirectory, std::string_view name) const
+    Result<std::vector<std::byte>>
+    D3D12Renderer::loadShaderBlob(const std::filesystem::path& shaderDirectory,
+                                  std::string_view name) const
     {
         const auto path = shaderDirectory / name;
         auto blob = readBinaryFile(path);
@@ -1159,20 +1174,21 @@ namespace r4d::d3d12
         rootDesc.Desc_1_1.pParameters = rootParameters;
         rootDesc.Desc_1_1.NumStaticSamplers = static_cast<UINT>(std::size(samplers));
         rootDesc.Desc_1_1.pStaticSamplers = samplers;
-        rootDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+        rootDesc.Desc_1_1.Flags =
+            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
         ComPtr<ID3DBlob> serialised;
         ComPtr<ID3DBlob> rootError;
-        const HRESULT hr = ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised,
-                                                                  &rootError);
+        const HRESULT hr =
+            ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised, &rootError);
         if (FAILED(hr))
         {
-            const char* detail = rootError
-                                     ? static_cast<const char*>(rootError->GetBufferPointer())
-                                     : "(no detail)";
-            return hresultError(ErrorCode::ApiCallFailed, hr,
-                                std::format("D3D12SerializeVersionedRootSignature: {}",
-                                            detail));
+            const char* detail =
+                rootError ? static_cast<const char*>(rootError->GetBufferPointer())
+                          : "(no detail)";
+            return hresultError(
+                ErrorCode::ApiCallFailed, hr,
+                std::format("D3D12SerializeVersionedRootSignature: {}", detail));
         }
 
         R4D_HR(m_device->CreateRootSignature(0, serialised->GetBufferPointer(),
@@ -1215,16 +1231,18 @@ namespace r4d::d3d12
         psoDesc.SampleDesc.Quality = 0;
         psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
-        R4D_HR(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)),
+        R4D_HR(m_device->CreateGraphicsPipelineState(&psoDesc,
+                                                     IID_PPV_ARGS(&m_pipelineState)),
                "ID3D12Device::CreateGraphicsPipelineState");
         m_pipelineState->SetName(L"Radiance4D PBR PSO");
 
         return Status::Ok();
     }
 
-    Result<ComPtr<ID3D12Resource>> D3D12Renderer::createTexture(
-        const ImageRgba8& image, bool srgb, ID3D12GraphicsCommandList7* commandList,
-        std::vector<ComPtr<ID3D12Resource>>& staging)
+    Result<ComPtr<ID3D12Resource>>
+    D3D12Renderer::createTexture(const ImageRgba8& image, bool srgb,
+                                 ID3D12GraphicsCommandList7* commandList,
+                                 std::vector<ComPtr<ID3D12Resource>>& staging)
     {
         const std::vector<ImageRgba8> levels = generateMipChain(image);
         const auto mipCount = static_cast<UINT16>(levels.size());
@@ -1242,9 +1260,9 @@ namespace r4d::d3d12
 
         const auto defaultHeap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
         ComPtr<ID3D12Resource> texture;
-        R4D_HR(m_device->CreateCommittedResource3(&defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
-                                                  D3D12_BARRIER_LAYOUT_COPY_DEST, nullptr,
-                                                  nullptr, 0, nullptr,
+        R4D_HR(m_device->CreateCommittedResource3(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+                                                  &desc, D3D12_BARRIER_LAYOUT_COPY_DEST,
+                                                  nullptr, nullptr, 0, nullptr,
                                                   IID_PPV_ARGS(&texture)),
                "CreateCommittedResource3 (texture)");
 
@@ -1259,10 +1277,9 @@ namespace r4d::d3d12
         const auto uploadHeap = heapProperties(D3D12_HEAP_TYPE_UPLOAD);
         const auto stagingDesc = bufferDesc(totalBytes);
         ComPtr<ID3D12Resource> upload;
-        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
-                                                 &stagingDesc,
-                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                 IID_PPV_ARGS(&upload)),
+        R4D_HR(m_device->CreateCommittedResource(
+                   &uploadHeap, D3D12_HEAP_FLAG_NONE, &stagingDesc,
+                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload)),
                "CreateCommittedResource (texture upload)");
 
         void* mapped = nullptr;
@@ -1270,14 +1287,15 @@ namespace r4d::d3d12
         R4D_HR(upload->Map(0, &noRead, &mapped), "Map (texture upload)");
         for (UINT16 level = 0; level < mipCount; ++level)
         {
-            auto* destination = static_cast<std::byte*>(mapped) + footprints[level].Offset;
+            auto* destination =
+                static_cast<std::byte*>(mapped) + footprints[level].Offset;
             const ImageRgba8& source = levels[level];
             for (UINT row = 0; row < rowCounts[level]; ++row)
             {
                 std::memcpy(destination + static_cast<std::size_t>(row) *
                                               footprints[level].Footprint.RowPitch,
-                            source.rgba.data() + static_cast<std::size_t>(row) *
-                                                     source.rowPitch(),
+                            source.rgba.data() +
+                                static_cast<std::size_t>(row) * source.rowPitch(),
                             static_cast<std::size_t>(rowBytes[level]));
             }
         }
@@ -1352,25 +1370,29 @@ namespace r4d::d3d12
         std::vector<ComPtr<ID3D12Resource>> staging;
 
         auto makeTexture = [&](const ImageRgba8& image,
-                               bool srgb) -> Result<ComPtr<ID3D12Resource>> {
-            return createTexture(image, srgb, m_commandList.Get(), staging);
-        };
+                               bool srgb) -> Result<ComPtr<ID3D12Resource>>
+        { return createTexture(image, srgb, m_commandList.Get(), staging); };
 
         auto whiteSrgb = makeTexture(white, true);
-        if (!whiteSrgb) return whiteSrgb.error();
+        if (!whiteSrgb)
+            return whiteSrgb.error();
         auto whiteLinear = makeTexture(white, false);
-        if (!whiteLinear) return whiteLinear.error();
+        if (!whiteLinear)
+            return whiteLinear.error();
         auto normalDefault = makeTexture(flatNormal, false);
-        if (!normalDefault) return normalDefault.error();
+        if (!normalDefault)
+            return normalDefault.error();
 
         const ImageRgba8& skyImage =
             model.environment.image.empty() ? white : model.environment.image;
         const ImageRgba8& irradianceImage =
             model.irradiance.image.empty() ? white : model.irradiance.image;
         auto sky = makeTexture(skyImage, true);
-        if (!sky) return sky.error();
+        if (!sky)
+            return sky.error();
         auto irradiance = makeTexture(irradianceImage, true);
-        if (!irradiance) return irradiance.error();
+        if (!irradiance)
+            return irradiance.error();
 
         m_textures.push_back(whiteSrgb.value());
         m_textures.push_back(whiteLinear.value());
@@ -1383,7 +1405,8 @@ namespace r4d::d3d12
         for (const TextureImage& source : model.textures)
         {
             auto created = makeTexture(source.image, source.srgb);
-            if (!created) return created.error();
+            if (!created)
+                return created.error();
             modelTextures.push_back(created.value());
             m_textures.push_back(created.value());
         }
@@ -1396,8 +1419,10 @@ namespace r4d::d3d12
         frame.fenceValue = fenceValue;
         R4D_TRY(waitForFenceValue(fenceValue));
 
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
-        const auto writeSrv = [&](ID3D12Resource* resource) {
+        D3D12_CPU_DESCRIPTOR_HANDLE handle =
+            m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+        const auto writeSrv = [&](ID3D12Resource* resource)
+        {
             const D3D12_RESOURCE_DESC desc = resource->GetDesc();
             D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
             srv.Format = desc.Format;
@@ -1409,7 +1434,8 @@ namespace r4d::d3d12
         };
 
         // The shadow map is typeless, so it needs its own view description.
-        const auto writeShadowSrv = [&]() {
+        const auto writeShadowSrv = [&]()
+        {
             D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
             srv.Format = DXGI_FORMAT_R32_FLOAT;
             srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -1425,12 +1451,13 @@ namespace r4d::d3d12
         writeSrv(sky.value().Get());
         writeSrv(irradiance.value().Get());
         writeShadowSrv();
-        writeSrv(whiteSrgb.value().Get());   // emissive default
+        writeSrv(whiteSrgb.value().Get()); // emissive default
 
         for (const Material& material : model.materials)
         {
             const auto pick = [&](std::int32_t index,
-                                  ID3D12Resource* fallback) -> ID3D12Resource* {
+                                  ID3D12Resource* fallback) -> ID3D12Resource*
+            {
                 if (index >= 0 && static_cast<std::size_t>(index) < modelTextures.size())
                 {
                     return modelTextures[static_cast<std::size_t>(index)].Get();
@@ -1455,7 +1482,8 @@ namespace r4d::d3d12
     {
         if (model.empty() || model.vertices.empty() || model.indices.empty())
         {
-            return makeError(ErrorCode::InvalidArgument, "uploadModel called with no geometry");
+            return makeError(ErrorCode::InvalidArgument,
+                             "uploadModel called with no geometry");
         }
 
         waitForGpuIdle();
@@ -1470,39 +1498,43 @@ namespace r4d::d3d12
 
         // Static geometry goes to device-local memory, uploaded once.
         const auto vbDesc = bufferDesc(vertexBytes);
-        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &vbDesc,
-                                                 D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                 IID_PPV_ARGS(&m_vertexBuffer)),
+        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &vbDesc, D3D12_RESOURCE_STATE_COMMON,
+                                                 nullptr, IID_PPV_ARGS(&m_vertexBuffer)),
                "CreateCommittedResource (vertex buffer)");
         m_vertexBuffer->SetName(L"Radiance4D Vertex Buffer");
 
         const auto ibDesc = bufferDesc(indexBytes);
-        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &ibDesc,
-                                                 D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                 IID_PPV_ARGS(&m_indexBuffer)),
+        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &ibDesc, D3D12_RESOURCE_STATE_COMMON,
+                                                 nullptr, IID_PPV_ARGS(&m_indexBuffer)),
                "CreateCommittedResource (index buffer)");
         m_indexBuffer->SetName(L"Radiance4D Index Buffer");
 
         ComPtr<ID3D12Resource> vertexUpload;
         ComPtr<ID3D12Resource> indexUpload;
-        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &vbDesc,
-                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                 IID_PPV_ARGS(&vertexUpload)),
+        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &vbDesc,
+                                                 D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                 nullptr, IID_PPV_ARGS(&vertexUpload)),
                "CreateCommittedResource (vertex upload)");
-        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &ibDesc,
-                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                 IID_PPV_ARGS(&indexUpload)),
+        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &ibDesc,
+                                                 D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                 nullptr, IID_PPV_ARGS(&indexUpload)),
                "CreateCommittedResource (index upload)");
 
         {
             void* mapped = nullptr;
             const D3D12_RANGE noRead{0, 0};
             R4D_HR(vertexUpload->Map(0, &noRead, &mapped), "Map (vertex upload)");
-            std::memcpy(mapped, model.vertices.data(), static_cast<std::size_t>(vertexBytes));
+            std::memcpy(mapped, model.vertices.data(),
+                        static_cast<std::size_t>(vertexBytes));
             vertexUpload->Unmap(0, nullptr);
 
             R4D_HR(indexUpload->Map(0, &noRead, &mapped), "Map (index upload)");
-            std::memcpy(mapped, model.indices.data(), static_cast<std::size_t>(indexBytes));
+            std::memcpy(mapped, model.indices.data(),
+                        static_cast<std::size_t>(indexBytes));
             indexUpload->Unmap(0, nullptr);
         }
 
@@ -1591,17 +1623,16 @@ namespace r4d::d3d12
         const auto uploadHeap = heapProperties(D3D12_HEAP_TYPE_UPLOAD);
         const auto splatDesc = bufferDesc(splatBytes);
 
-        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
-                                                 &splatDesc, D3D12_RESOURCE_STATE_COMMON,
-                                                 nullptr, IID_PPV_ARGS(&m_gaussianBuffer)),
+        R4D_HR(m_device->CreateCommittedResource(
+                   &defaultHeap, D3D12_HEAP_FLAG_NONE, &splatDesc,
+                   D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_gaussianBuffer)),
                "CreateCommittedResource (gaussian buffer)");
         m_gaussianBuffer->SetName(L"Radiance4D Gaussian Buffer");
 
         ComPtr<ID3D12Resource> upload;
-        R4D_HR(m_device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
-                                                 &splatDesc,
-                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                 IID_PPV_ARGS(&upload)),
+        R4D_HR(m_device->CreateCommittedResource(
+                   &uploadHeap, D3D12_HEAP_FLAG_NONE, &splatDesc,
+                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload)),
                "CreateCommittedResource (gaussian upload)");
         {
             void* mapped = nullptr;
@@ -1625,9 +1656,8 @@ namespace r4d::d3d12
         m_pairTileCount = m_pairCapacity / kSortGroupSize;
 
         const auto createSortBuffer = [&](UINT64 entries, const wchar_t* name,
-                                          ComPtr<ID3D12Resource>& out) -> Status {
-            return createSortBufferOf(entries, name, out);
-        };
+                                          ComPtr<ID3D12Resource>& out) -> Status
+        { return createSortBufferOf(entries, name, out); };
 
         for (UINT i = 0; i < kFramesInFlight; ++i)
         {
@@ -1675,7 +1705,6 @@ namespace r4d::d3d12
                                                      IID_PPV_ARGS(&sort.projections)),
                    "CreateCommittedResource (splat projections)");
             sort.projections->SetName(L"Radiance4D Splat Projections");
-
         }
 
         R4D_TRY(createPairBuffers());
@@ -1733,9 +1762,9 @@ namespace r4d::d3d12
         const auto defaultHeap = heapProperties(D3D12_HEAP_TYPE_DEFAULT);
         auto desc = bufferDesc(entries * sizeof(std::uint32_t));
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &desc,
-                                                 D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                 IID_PPV_ARGS(&out)),
+        R4D_HR(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+                                                 &desc, D3D12_RESOURCE_STATE_COMMON,
+                                                 nullptr, IID_PPV_ARGS(&out)),
                "CreateCommittedResource (splat sort buffer)");
         out->SetName(name);
         return Status::Ok();
@@ -1748,14 +1777,14 @@ namespace r4d::d3d12
     {
         // Digit-major, one row of per-tile counts per digit. The tile sort runs
         // over the pairs, which is the larger of the two.
-        const UINT64 histogramEntries =
-            static_cast<UINT64>(kSortBuckets) * std::max(m_sortTileCount, m_pairTileCount);
+        const UINT64 histogramEntries = static_cast<UINT64>(kSortBuckets) *
+                                        std::max(m_sortTileCount, m_pairTileCount);
 
         for (UINT i = 0; i < kFramesInFlight; ++i)
         {
             SortBuffers& sort = m_sortBuffers[i];
-            R4D_TRY(createSortBufferOf(histogramEntries,
-                                       L"Radiance4D Splat Sort Histogram", sort.histogram));
+            R4D_TRY(createSortBufferOf(
+                histogramEntries, L"Radiance4D Splat Sort Histogram", sort.histogram));
             R4D_TRY(createSortBufferOf(m_pairCapacity, L"Radiance4D Splat Pair Tiles A",
                                        sort.pairTileA));
             R4D_TRY(createSortBufferOf(m_pairCapacity, L"Radiance4D Splat Pair Tiles B",
@@ -1792,9 +1821,9 @@ namespace r4d::d3d12
         {
             return 0;
         }
-        const UINT64 entries =
-            static_cast<UINT64>(4) * m_pairCapacity +
-            static_cast<UINT64>(kSortBuckets) * std::max(m_sortTileCount, m_pairTileCount);
+        const UINT64 entries = static_cast<UINT64>(4) * m_pairCapacity +
+                               static_cast<UINT64>(kSortBuckets) *
+                                   std::max(m_sortTileCount, m_pairTileCount);
         return entries * sizeof(std::uint32_t) * kFramesInFlight;
     }
 
@@ -1813,8 +1842,7 @@ namespace r4d::d3d12
     // the buffers to what was measured and carry on.
     Status D3D12Renderer::growPairBuffers(UINT wanted)
     {
-        const UINT64 ceiling =
-            static_cast<UINT64>(m_gaussianCount) * kMaxPairsPerSplat;
+        const UINT64 ceiling = static_cast<UINT64>(m_gaussianCount) * kMaxPairsPerSplat;
         const UINT64 target =
             static_cast<UINT64>(wanted) + wanted / 100 * kPairGrowthPercent;
         if (target > ceiling)
@@ -1876,15 +1904,21 @@ namespace r4d::d3d12
         m_commandList->SetComputeRootShaderResourceView(
             2, m_gaussianBuffer->GetGPUVirtualAddress());
 
-        ID3D12Resource* const buffers[kSortUavCount] = {
-            sort.keysA.Get(),       sort.keysB.Get(),
-            m_gaussianOrder[frameIndex].Get(), sort.valuesB.Get(),
-            sort.histogram.Get(),   sort.digitBase.Get(),
-            sort.projections.Get(), sort.tileCounts.Get(),
-            sort.tileOffsets.Get(), sort.groupSums.Get(),
-            sort.pairTileA.Get(),   sort.pairTileB.Get(),
-            sort.pairSplatA.Get(),  sort.pairSplatB.Get(),
-            sort.tileRanges.Get()};
+        ID3D12Resource* const buffers[kSortUavCount] = {sort.keysA.Get(),
+                                                        sort.keysB.Get(),
+                                                        m_gaussianOrder[frameIndex].Get(),
+                                                        sort.valuesB.Get(),
+                                                        sort.histogram.Get(),
+                                                        sort.digitBase.Get(),
+                                                        sort.projections.Get(),
+                                                        sort.tileCounts.Get(),
+                                                        sort.tileOffsets.Get(),
+                                                        sort.groupSums.Get(),
+                                                        sort.pairTileA.Get(),
+                                                        sort.pairTileB.Get(),
+                                                        sort.pairSplatA.Get(),
+                                                        sort.pairSplatB.Get(),
+                                                        sort.tileRanges.Get()};
         for (UINT i = 0; i < kSortUavCount; ++i)
         {
             m_commandList->SetComputeRootUnorderedAccessView(
@@ -1899,7 +1933,8 @@ namespace r4d::d3d12
         // The binning scan leaves the pair total one past the per-group sums.
         constants.pairTotalSlot = m_sortTileCount;
 
-        const auto dispatch = [&](SortStage stage, UINT groups) {
+        const auto dispatch = [&](SortStage stage, UINT groups)
+        {
             m_commandList->SetPipelineState(
                 m_sortPipelines[static_cast<std::size_t>(stage)].Get());
             m_commandList->SetComputeRoot32BitConstants(1, kSortRootConstants, &constants,
@@ -1980,10 +2015,9 @@ namespace r4d::d3d12
             D3D12PassScope scope(m_profiler, m_commandList.Get(), frameIndex,
                                  GpuPass::SplatTileSort);
 
-            ID3D12Resource* const pairBuffers[4] = {sort.pairTileA.Get(),
-                                                    sort.pairTileB.Get(),
-                                                    sort.pairSplatA.Get(),
-                                                    sort.pairSplatB.Get()};
+            ID3D12Resource* const pairBuffers[4] = {
+                sort.pairTileA.Get(), sort.pairTileB.Get(), sort.pairSplatA.Get(),
+                sort.pairSplatB.Get()};
             for (UINT i = 0; i < 4; ++i)
             {
                 m_commandList->SetComputeRootUnorderedAccessView(
@@ -2053,14 +2087,14 @@ namespace r4d::d3d12
                              GpuPass::SplatRaster);
 
         // The mesh pass wrote the depth it is about to read.
-        submitTextureBarrier(
-            m_commandList.Get(),
-            textureBarrier(m_depthBuffer.Get(), D3D12_BARRIER_SYNC_DEPTH_STENCIL,
-                           D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
-                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
-                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
+        submitTextureBarrier(m_commandList.Get(),
+                             textureBarrier(m_depthBuffer.Get(),
+                                            D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+                                            D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                            D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                                            D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                                            D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
+                                            D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
 
         ID3D12DescriptorHeap* heaps[] = {m_splatHeap.Get()};
         m_commandList->SetDescriptorHeaps(1, heaps);
@@ -2070,15 +2104,21 @@ namespace r4d::d3d12
         m_commandList->SetComputeRootShaderResourceView(
             2, m_gaussianBuffer->GetGPUVirtualAddress());
 
-        ID3D12Resource* const buffers[kSortUavCount] = {
-            sort.keysA.Get(),       sort.keysB.Get(),
-            m_gaussianOrder[frameIndex].Get(), sort.valuesB.Get(),
-            sort.histogram.Get(),   sort.digitBase.Get(),
-            sort.projections.Get(), sort.tileCounts.Get(),
-            sort.tileOffsets.Get(), sort.groupSums.Get(),
-            sort.pairTileA.Get(),   sort.pairTileB.Get(),
-            sort.pairSplatA.Get(),  sort.pairSplatB.Get(),
-            sort.tileRanges.Get()};
+        ID3D12Resource* const buffers[kSortUavCount] = {sort.keysA.Get(),
+                                                        sort.keysB.Get(),
+                                                        m_gaussianOrder[frameIndex].Get(),
+                                                        sort.valuesB.Get(),
+                                                        sort.histogram.Get(),
+                                                        sort.digitBase.Get(),
+                                                        sort.projections.Get(),
+                                                        sort.tileCounts.Get(),
+                                                        sort.tileOffsets.Get(),
+                                                        sort.groupSums.Get(),
+                                                        sort.pairTileA.Get(),
+                                                        sort.pairTileB.Get(),
+                                                        sort.pairSplatA.Get(),
+                                                        sort.pairSplatB.Get(),
+                                                        sort.tileRanges.Get()};
         for (UINT i = 0; i < kSortUavCount; ++i)
         {
             m_commandList->SetComputeRootUnorderedAccessView(
@@ -2101,24 +2141,24 @@ namespace r4d::d3d12
         const UINT tilesY = (m_size.y + kSplatTileSize - 1) / kSplatTileSize;
         m_commandList->Dispatch(tilesX, tilesY, 1);
 
-        submitTextureBarrier(
-            m_commandList.Get(),
-            textureBarrier(m_depthBuffer.Get(), D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-                           D3D12_BARRIER_SYNC_DEPTH_STENCIL,
-                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-                           D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
-                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
-                           D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE));
+        submitTextureBarrier(m_commandList.Get(),
+                             textureBarrier(m_depthBuffer.Get(),
+                                            D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                            D3D12_BARRIER_SYNC_DEPTH_STENCIL,
+                                            D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                                            D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
+                                            D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                                            D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE));
 
         // The composite reads what the rasteriser just wrote.
-        submitTextureBarrier(
-            m_commandList.Get(),
-            textureBarrier(m_splatColour.Get(), D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-                           D3D12_BARRIER_SYNC_PIXEL_SHADING,
-                           D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
-                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-                           D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS,
-                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
+        submitTextureBarrier(m_commandList.Get(),
+                             textureBarrier(m_splatColour.Get(),
+                                            D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                            D3D12_BARRIER_SYNC_PIXEL_SHADING,
+                                            D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                                            D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                                            D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS,
+                                            D3D12_BARRIER_LAYOUT_SHADER_RESOURCE));
     }
 
     void D3D12Renderer::renderSplats(UINT frameIndex, std::uint32_t& drawCalls,
@@ -2141,26 +2181,27 @@ namespace r4d::d3d12
 
         D3D12_GPU_DESCRIPTOR_HANDLE colour =
             m_splatHeap->GetGPUDescriptorHandleForHeapStart();
-        colour.ptr += 2ull * m_splatDescriptorSize;   // depth SRV, colour UAV, colour SRV
+        colour.ptr += 2ull * m_splatDescriptorSize; // depth SRV, colour UAV, colour SRV
         m_commandList->SetGraphicsRootDescriptorTable(0, colour);
 
         m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         m_commandList->DrawInstanced(3, 1, 0, 0);
 
-        submitTextureBarrier(
-            m_commandList.Get(),
-            textureBarrier(m_splatColour.Get(), D3D12_BARRIER_SYNC_PIXEL_SHADING,
-                           D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-                           D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-                           D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
-                           D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
-                           D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS));
+        submitTextureBarrier(m_commandList.Get(),
+                             textureBarrier(m_splatColour.Get(),
+                                            D3D12_BARRIER_SYNC_PIXEL_SHADING,
+                                            D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                            D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                                            D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                                            D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                                            D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS));
 
         ++drawCalls;
         triangles += 1;
     }
 
-    Status D3D12Renderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
+    Status
+    D3D12Renderer::createSortPipelines(const std::filesystem::path& shaderDirectory)
     {
         // Buffers only, so root descriptors are enough here too: no heap, no
         // table. 24 DWORDs of a 64-DWORD budget.
@@ -2199,13 +2240,13 @@ namespace r4d::d3d12
         D3D12_DESCRIPTOR_RANGE1 textureRanges[2]{};
         textureRanges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         textureRanges[0].NumDescriptors = 1;
-        textureRanges[0].BaseShaderRegister = 3;   // t3, the mesh depth
+        textureRanges[0].BaseShaderRegister = 3; // t3, the mesh depth
         textureRanges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
         textureRanges[0].OffsetInDescriptorsFromTableStart = 0;
 
         textureRanges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
         textureRanges[1].NumDescriptors = 1;
-        textureRanges[1].BaseShaderRegister = 15;   // u15, the splat colour
+        textureRanges[1].BaseShaderRegister = 15; // u15, the splat colour
         textureRanges[1].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
         textureRanges[1].OffsetInDescriptorsFromTableStart = 1;
 
@@ -2224,13 +2265,13 @@ namespace r4d::d3d12
 
         ComPtr<ID3DBlob> serialised;
         ComPtr<ID3DBlob> rootError;
-        const HRESULT hr = ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised,
-                                                                  &rootError);
+        const HRESULT hr =
+            ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised, &rootError);
         if (FAILED(hr))
         {
-            const char* detail = rootError
-                                     ? static_cast<const char*>(rootError->GetBufferPointer())
-                                     : "(no detail)";
+            const char* detail =
+                rootError ? static_cast<const char*>(rootError->GetBufferPointer())
+                          : "(no detail)";
             return hresultError(ErrorCode::ApiCallFailed, hr,
                                 std::format("SerializeVersionedRootSignature (splat "
                                             "sort): {}",
@@ -2245,12 +2286,18 @@ namespace r4d::d3d12
 
         // Indexed by SortStage, so the order of these must match the enum.
         static constexpr std::string_view kStageShaders[] = {
-            "SplatCull.cs.dxil",          "SplatSortHistogram.cs.dxil",
-            "SplatSortScanRows.cs.dxil",  "SplatSortScanTotals.cs.dxil",
-            "SplatSortScatter.cs.dxil",   "SplatBinCount.cs.dxil",
-            "SplatScanGroups.cs.dxil",    "SplatScanGroupSums.cs.dxil",
-            "SplatScanAdd.cs.dxil",       "SplatBin.cs.dxil",
-            "SplatTileRangesReset.cs.dxil", "SplatTileRanges.cs.dxil",
+            "SplatCull.cs.dxil",
+            "SplatSortHistogram.cs.dxil",
+            "SplatSortScanRows.cs.dxil",
+            "SplatSortScanTotals.cs.dxil",
+            "SplatSortScatter.cs.dxil",
+            "SplatBinCount.cs.dxil",
+            "SplatScanGroups.cs.dxil",
+            "SplatScanGroupSums.cs.dxil",
+            "SplatScanAdd.cs.dxil",
+            "SplatBin.cs.dxil",
+            "SplatTileRangesReset.cs.dxil",
+            "SplatTileRanges.cs.dxil",
             "SplatRaster.cs.dxil"};
         static_assert(std::size(kStageShaders) ==
                       static_cast<std::size_t>(SortStage::Count));
@@ -2267,15 +2314,16 @@ namespace r4d::d3d12
             desc.pRootSignature = m_sortRootSignature.Get();
             desc.CS.pShaderBytecode = blob.value().data();
             desc.CS.BytecodeLength = blob.value().size();
-            R4D_HR(m_device->CreateComputePipelineState(&desc,
-                                                        IID_PPV_ARGS(&m_sortPipelines[i])),
+            R4D_HR(m_device->CreateComputePipelineState(
+                       &desc, IID_PPV_ARGS(&m_sortPipelines[i])),
                    "CreateComputePipelineState (splat sort)");
         }
 
         return Status::Ok();
     }
 
-    Status D3D12Renderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
+    Status
+    D3D12Renderer::createSplatPipeline(const std::filesystem::path& shaderDirectory)
     {
         auto vertexShader = loadShaderBlob(shaderDirectory, "SplatComposite.vs.dxil");
         if (!vertexShader)
@@ -2309,13 +2357,13 @@ namespace r4d::d3d12
 
         ComPtr<ID3DBlob> serialised;
         ComPtr<ID3DBlob> rootError;
-        const HRESULT hr = ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised,
-                                                                  &rootError);
+        const HRESULT hr =
+            ::D3D12SerializeVersionedRootSignature(&rootDesc, &serialised, &rootError);
         if (FAILED(hr))
         {
-            const char* detail = rootError
-                                     ? static_cast<const char*>(rootError->GetBufferPointer())
-                                     : "(no detail)";
+            const char* detail =
+                rootError ? static_cast<const char*>(rootError->GetBufferPointer())
+                          : "(no detail)";
             return hresultError(ErrorCode::ApiCallFailed, hr,
                                 std::format("SerializeVersionedRootSignature (splat "
                                             "composite): {}",
@@ -2383,9 +2431,11 @@ namespace r4d::d3d12
             {
                 logDeviceRemovedDiagnostics(m_device.Get(), removal);
             }
-            return makeError(ErrorCode::ApiCallFailed,
-                             std::format("timed out waiting for fence value {} (completed "
-                                         "{})", value, m_fence->GetCompletedValue()));
+            return makeError(
+                ErrorCode::ApiCallFailed,
+                std::format("timed out waiting for fence value {} (completed "
+                            "{})",
+                            value, m_fence->GetCompletedValue()));
         }
         return Status::Ok();
     }
@@ -2486,7 +2536,8 @@ namespace r4d::d3d12
         // Fixed step makes a capture depend on the frame number alone.
         const float timeSeconds =
             (m_fixedTimeStep > 0.0)
-                ? static_cast<float>(static_cast<double>(m_frameCounter) * m_fixedTimeStep)
+                ? static_cast<float>(static_cast<double>(m_frameCounter) *
+                                     m_fixedTimeStep)
                 : static_cast<float>(m_frameTimer.totalSeconds());
 
         // Safe to write: the fence wait proved the GPU is done with this slot.
@@ -2495,8 +2546,8 @@ namespace r4d::d3d12
             constants.viewProjection = m_camera.projection * m_camera.view;
             constants.lightViewProjection = lightViewProjection();
             constants.view = m_camera.view;
-            constants.splatViewport = Vec2{static_cast<float>(m_size.x),
-                                           static_cast<float>(m_size.y)};
+            constants.splatViewport =
+                Vec2{static_cast<float>(m_size.x), static_cast<float>(m_size.y)};
             // Focal length in pixels, recovered from the projection, which is
             // what the covariance Jacobian needs.
             constants.splatFocal =
@@ -2506,8 +2557,9 @@ namespace r4d::d3d12
             constants.shadowTexelSize = 1.0f / static_cast<float>(kShadowMapSize);
             constants.cameraPosition = m_camera.position;
             constants.timeSeconds = timeSeconds;
-            constants.ambient = Vec3{m_settings.ambientIntensity, m_settings.ambientIntensity,
-                                     m_settings.ambientIntensity};
+            constants.ambient =
+                Vec3{m_settings.ambientIntensity, m_settings.ambientIntensity,
+                     m_settings.ambientIntensity};
             constants.exposure = m_settings.exposure;
 
             constants.lights[0].direction = glm::normalize(Vec3{-0.4f, 0.8f, -0.45f});
@@ -2550,14 +2602,13 @@ namespace r4d::d3d12
         // The offscreen target stays in RENDER_TARGET, so it needs no transition.
         if (!m_headless)
         {
-            submitTextureBarrier(
-                m_commandList.Get(),
-                textureBarrier(renderTarget,
-                               D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_RENDER_TARGET,
-                               D3D12_BARRIER_ACCESS_NO_ACCESS,
-                               D3D12_BARRIER_ACCESS_RENDER_TARGET,
-                               D3D12_BARRIER_LAYOUT_PRESENT,
-                               D3D12_BARRIER_LAYOUT_RENDER_TARGET));
+            submitTextureBarrier(m_commandList.Get(),
+                                 textureBarrier(renderTarget, D3D12_BARRIER_SYNC_NONE,
+                                                D3D12_BARRIER_SYNC_RENDER_TARGET,
+                                                D3D12_BARRIER_ACCESS_NO_ACCESS,
+                                                D3D12_BARRIER_ACCESS_RENDER_TARGET,
+                                                D3D12_BARRIER_LAYOUT_PRESENT,
+                                                D3D12_BARRIER_LAYOUT_RENDER_TARGET));
         }
 
         D3D12_CPU_DESCRIPTOR_HANDLE rtv = currentRenderTargetView(backBufferIndex);
@@ -2577,7 +2628,8 @@ namespace r4d::d3d12
         viewport.MaxDepth = 1.0f;
         m_commandList->RSSetViewports(1, &viewport);
 
-        D3D12_RECT scissor{0, 0, static_cast<LONG>(m_size.x), static_cast<LONG>(m_size.y)};
+        D3D12_RECT scissor{0, 0, static_cast<LONG>(m_size.x),
+                           static_cast<LONG>(m_size.y)};
         m_commandList->RSSetScissorRects(1, &scissor);
 
         m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
@@ -2598,10 +2650,9 @@ namespace r4d::d3d12
 
         for (const Primitive& primitive : m_primitives)
         {
-            const Material& material =
-                primitive.materialIndex < m_materials.size()
-                    ? m_materials[primitive.materialIndex]
-                    : m_materials.front();
+            const Material& material = primitive.materialIndex < m_materials.size()
+                                           ? m_materials[primitive.materialIndex]
+                                           : m_materials.front();
 
             MaterialConstants constants{};
             constants.baseColour = material.baseColour;
@@ -2618,9 +2669,8 @@ namespace r4d::d3d12
                          kTexturesPerMaterial * m_srvDescriptorSize;
             m_commandList->SetGraphicsRootDescriptorTable(2, table);
 
-            m_commandList->DrawIndexedInstanced(primitive.indexCount, 1,
-                                                primitive.firstIndex,
-                                                primitive.vertexOffset, 0);
+            m_commandList->DrawIndexedInstanced(
+                primitive.indexCount, 1, primitive.firstIndex, primitive.vertexOffset, 0);
             ++drawCalls;
             triangles += primitive.indexCount / 3;
         }
@@ -2641,12 +2691,11 @@ namespace r4d::d3d12
         {
             submitTextureBarrier(
                 m_commandList.Get(),
-                textureBarrier(renderTarget,
-                               D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_SYNC_NONE,
-                               D3D12_BARRIER_ACCESS_RENDER_TARGET,
-                               D3D12_BARRIER_ACCESS_NO_ACCESS,
-                               D3D12_BARRIER_LAYOUT_RENDER_TARGET,
-                               D3D12_BARRIER_LAYOUT_PRESENT));
+                textureBarrier(
+                    renderTarget, D3D12_BARRIER_SYNC_RENDER_TARGET,
+                    D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_ACCESS_RENDER_TARGET,
+                    D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_LAYOUT_RENDER_TARGET,
+                    D3D12_BARRIER_LAYOUT_PRESENT));
         }
 
         m_profiler.endFrame(m_commandList.Get(), frameIndex);
@@ -2681,7 +2730,8 @@ namespace r4d::d3d12
 
         // The value this slot must reach before reuse.
         frame.fenceValue = m_nextFenceValue;
-        R4D_HR(m_queue->Signal(m_fence.Get(), m_nextFenceValue), "ID3D12CommandQueue::Signal");
+        R4D_HR(m_queue->Signal(m_fence.Get(), m_nextFenceValue),
+               "ID3D12CommandQueue::Signal");
         ++m_nextFenceValue;
         ++m_frameCounter;
 
@@ -2734,15 +2784,17 @@ namespace r4d::d3d12
             flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
         }
 
-        const HRESULT hr = m_swapChain->ResizeBuffers(kBackBufferCount, newSize.x, newSize.y,
-                                                      kBackBufferFormat, flags);
+        const HRESULT hr = m_swapChain->ResizeBuffers(
+            kBackBufferCount, newSize.x, newSize.y, kBackBufferFormat, flags);
         if (FAILED(hr))
         {
             if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
             {
-                logDeviceRemovedDiagnostics(m_device.Get(), m_device->GetDeviceRemovedReason());
+                logDeviceRemovedDiagnostics(m_device.Get(),
+                                            m_device->GetDeviceRemovedReason());
             }
-            return hresultError(ErrorCode::ApiCallFailed, hr, "IDXGISwapChain::ResizeBuffers");
+            return hresultError(ErrorCode::ApiCallFailed, hr,
+                                "IDXGISwapChain::ResizeBuffers");
         }
 
         m_size = newSize;
@@ -2777,7 +2829,8 @@ namespace r4d::d3d12
 
         ID3D12Resource* source = currentRenderTarget(m_lastRenderedBackBuffer);
         const D3D12_BARRIER_LAYOUT restingLayout =
-            m_headless ? D3D12_BARRIER_LAYOUT_RENDER_TARGET : D3D12_BARRIER_LAYOUT_PRESENT;
+            m_headless ? D3D12_BARRIER_LAYOUT_RENDER_TARGET
+                       : D3D12_BARRIER_LAYOUT_PRESENT;
 
         const D3D12_RESOURCE_DESC sourceDesc = source->GetDesc();
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
@@ -2792,10 +2845,10 @@ namespace r4d::d3d12
             m_captureReadback.Reset();
             const auto readbackHeap = heapProperties(D3D12_HEAP_TYPE_READBACK);
             const auto desc = bufferDesc(totalBytes);
-            R4D_HR(m_device->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE,
-                                                     &desc,
-                                                     D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                                                     IID_PPV_ARGS(&m_captureReadback)),
+            R4D_HR(m_device->CreateCommittedResource(
+                       &readbackHeap, D3D12_HEAP_FLAG_NONE, &desc,
+                       D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                       IID_PPV_ARGS(&m_captureReadback)),
                    "CreateCommittedResource (capture readback)");
             m_captureReadback->SetName(L"Radiance4D Capture Readback");
             m_captureReadbackBytes = totalBytes;
@@ -2809,8 +2862,9 @@ namespace r4d::d3d12
         submitTextureBarrier(
             m_commandList.Get(),
             textureBarrier(source, D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_COPY,
-                           D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_ACCESS_COPY_SOURCE,
-                           restingLayout, D3D12_BARRIER_LAYOUT_COPY_SOURCE));
+                           D3D12_BARRIER_ACCESS_NO_ACCESS,
+                           D3D12_BARRIER_ACCESS_COPY_SOURCE, restingLayout,
+                           D3D12_BARRIER_LAYOUT_COPY_SOURCE));
 
         D3D12_TEXTURE_COPY_LOCATION destination{};
         destination.pResource = m_captureReadback.Get();
@@ -2828,7 +2882,8 @@ namespace r4d::d3d12
         submitTextureBarrier(
             m_commandList.Get(),
             textureBarrier(source, D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_NONE,
-                           D3D12_BARRIER_ACCESS_COPY_SOURCE, D3D12_BARRIER_ACCESS_NO_ACCESS,
+                           D3D12_BARRIER_ACCESS_COPY_SOURCE,
+                           D3D12_BARRIER_ACCESS_NO_ACCESS,
                            D3D12_BARRIER_LAYOUT_COPY_SOURCE, restingLayout));
 
         R4D_HR(m_commandList->Close(), "Close (capture command list)");
@@ -2848,16 +2903,18 @@ namespace r4d::d3d12
         FrameCapture capture;
         capture.width = static_cast<std::uint32_t>(sourceDesc.Width);
         capture.height = static_cast<std::uint32_t>(sourceDesc.Height);
-        capture.rgba.resize(static_cast<std::size_t>(capture.width) * capture.height * 4u);
+        capture.rgba.resize(static_cast<std::size_t>(capture.width) * capture.height *
+                            4u);
 
         // The footprint pitch is padded, so copy row by row.
         const auto* sourceBytes =
             static_cast<const std::byte*>(mapped) + footprint.Offset;
         for (std::uint32_t y = 0; y < capture.height; ++y)
         {
-            std::memcpy(capture.rgba.data() + static_cast<std::size_t>(y) * capture.width * 4u,
-                        sourceBytes + static_cast<std::size_t>(y) * footprint.Footprint.RowPitch,
-                        static_cast<std::size_t>(capture.width) * 4u);
+            std::memcpy(
+                capture.rgba.data() + static_cast<std::size_t>(y) * capture.width * 4u,
+                sourceBytes + static_cast<std::size_t>(y) * footprint.Footprint.RowPitch,
+                static_cast<std::size_t>(capture.width) * 4u);
         }
 
         const D3D12_RANGE wroteNothing{0, 0};

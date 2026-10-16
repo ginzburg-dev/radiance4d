@@ -36,8 +36,8 @@ TEST(Math, CoordinateSystemIsLeftHanded)
               "world space";
 #endif
     // Left-handed: x cross y gives +z.
-    const r4d::Vec3 crossed = glm::cross(r4d::Vec3{1.0f, 0.0f, 0.0f},
-                                         r4d::Vec3{0.0f, 1.0f, 0.0f});
+    const r4d::Vec3 crossed =
+        glm::cross(r4d::Vec3{1.0f, 0.0f, 0.0f}, r4d::Vec3{0.0f, 1.0f, 0.0f});
     EXPECT_NEAR(crossed.z, 1.0f, 1e-6f);
 }
 

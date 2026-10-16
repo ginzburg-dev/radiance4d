@@ -21,7 +21,8 @@ namespace r4d::vulkan
             std::string out;
             out.reserve(text.size());
             std::transform(text.begin(), text.end(), std::back_inserter(out),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                           [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
             return out;
         }
 
@@ -43,9 +44,9 @@ namespace r4d::vulkan
             vkEnumerateInstanceLayerProperties(&count, nullptr);
             std::vector<VkLayerProperties> layers(count);
             vkEnumerateInstanceLayerProperties(&count, layers.data());
-            return std::any_of(layers.begin(), layers.end(), [&](const VkLayerProperties& l) {
-                return std::strcmp(l.layerName, name) == 0;
-            });
+            return std::any_of(layers.begin(), layers.end(),
+                               [&](const VkLayerProperties& l)
+                               { return std::strcmp(l.layerName, name) == 0; });
         }
 
         const char* deviceTypeName(VkPhysicalDeviceType type)
@@ -53,17 +54,18 @@ namespace r4d::vulkan
             switch (type)
             {
                 case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "integrated";
-                case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   return "discrete";
-                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    return "virtual";
-                case VK_PHYSICAL_DEVICE_TYPE_CPU:            return "cpu";
-                default:                                     return "other";
+                case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return "discrete";
+                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return "virtual";
+                case VK_PHYSICAL_DEVICE_TYPE_CPU: return "cpu";
+                default: return "other";
             }
         }
 
         std::string apiVersionString(std::uint32_t version)
         {
             return std::format("{}.{}.{}", VK_API_VERSION_MAJOR(version),
-                               VK_API_VERSION_MINOR(version), VK_API_VERSION_PATCH(version));
+                               VK_API_VERSION_MINOR(version),
+                               VK_API_VERSION_PATCH(version));
         }
     } // namespace
 
@@ -71,23 +73,22 @@ namespace r4d::vulkan
     {
         switch (result)
         {
-            case VK_SUCCESS:                        return "VK_SUCCESS";
-            case VK_NOT_READY:                      return "VK_NOT_READY";
-            case VK_TIMEOUT:                        return "VK_TIMEOUT";
-            case VK_SUBOPTIMAL_KHR:                 return "VK_SUBOPTIMAL_KHR";
-            case VK_ERROR_OUT_OF_HOST_MEMORY:       return "VK_ERROR_OUT_OF_HOST_MEMORY";
-            case VK_ERROR_OUT_OF_DEVICE_MEMORY:     return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
-            case VK_ERROR_INITIALIZATION_FAILED:    return "VK_ERROR_INITIALIZATION_FAILED";
-            case VK_ERROR_DEVICE_LOST:              return "VK_ERROR_DEVICE_LOST";
-            case VK_ERROR_LAYER_NOT_PRESENT:        return "VK_ERROR_LAYER_NOT_PRESENT";
-            case VK_ERROR_EXTENSION_NOT_PRESENT:    return "VK_ERROR_EXTENSION_NOT_PRESENT";
-            case VK_ERROR_FEATURE_NOT_PRESENT:      return "VK_ERROR_FEATURE_NOT_PRESENT";
-            case VK_ERROR_INCOMPATIBLE_DRIVER:      return "VK_ERROR_INCOMPATIBLE_DRIVER";
-            case VK_ERROR_FORMAT_NOT_SUPPORTED:     return "VK_ERROR_FORMAT_NOT_SUPPORTED";
-            case VK_ERROR_SURFACE_LOST_KHR:         return "VK_ERROR_SURFACE_LOST_KHR";
-            case VK_ERROR_OUT_OF_DATE_KHR:          return "VK_ERROR_OUT_OF_DATE_KHR";
-            default:
-                return std::format("VkResult {}", static_cast<int>(result));
+            case VK_SUCCESS: return "VK_SUCCESS";
+            case VK_NOT_READY: return "VK_NOT_READY";
+            case VK_TIMEOUT: return "VK_TIMEOUT";
+            case VK_SUBOPTIMAL_KHR: return "VK_SUBOPTIMAL_KHR";
+            case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+            case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+            case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
+            case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT";
+            case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
+            case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
+            case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
+            case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+            case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR";
+            case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR";
+            default: return std::format("VkResult {}", static_cast<int>(result));
         }
     }
 
@@ -111,7 +112,8 @@ namespace r4d::vulkan
         }
     }
 
-    Status createInstance(DeviceContext& context, bool enableValidation, ValidationSink* sink)
+    Status createInstance(DeviceContext& context, bool enableValidation,
+                          ValidationSink* sink)
     {
         VkApplicationInfo appInfo{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         appInfo.pApplicationName = "Radiance4D";
@@ -127,7 +129,8 @@ namespace r4d::vulkan
         };
         std::vector<const char*> layers;
 
-        const bool validationWanted = enableValidation && layerAvailable(kValidationLayer);
+        const bool validationWanted =
+            enableValidation && layerAvailable(kValidationLayer);
         if (enableValidation && !validationWanted)
         {
             R4D_WARN("Vulkan: {} not available; this run will NOT be validated",
@@ -162,16 +165,19 @@ namespace r4d::vulkan
             info.pNext = &messengerInfo;
         }
 
-        R4D_VK_DEVICE(vkCreateInstance(&info, nullptr, &context.instance), "vkCreateInstance");
+        R4D_VK_DEVICE(vkCreateInstance(&info, nullptr, &context.instance),
+                      "vkCreateInstance");
 
         if (validationWanted)
         {
             auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-                vkGetInstanceProcAddr(context.instance, "vkCreateDebugUtilsMessengerEXT"));
+                vkGetInstanceProcAddr(context.instance,
+                                      "vkCreateDebugUtilsMessengerEXT"));
             if (create != nullptr)
             {
-                R4D_VK(create(context.instance, &messengerInfo, nullptr, &context.messenger),
-                       "vkCreateDebugUtilsMessengerEXT");
+                R4D_VK(
+                    create(context.instance, &messengerInfo, nullptr, &context.messenger),
+                    "vkCreateDebugUtilsMessengerEXT");
                 context.validationEnabled = true;
                 R4D_INFO("Vulkan: validation layer active, messages are counted");
             }
@@ -191,8 +197,9 @@ namespace r4d::vulkan
                              "no Vulkan physical devices were enumerated");
         }
         std::vector<VkPhysicalDevice> devices(count);
-        R4D_VK_DEVICE(vkEnumeratePhysicalDevices(context.instance, &count, devices.data()),
-                      "vkEnumeratePhysicalDevices");
+        R4D_VK_DEVICE(
+            vkEnumeratePhysicalDevices(context.instance, &count, devices.data()),
+            "vkEnumeratePhysicalDevices");
 
         const std::string wanted = toLower(selector);
         VkPhysicalDevice chosen = VK_NULL_HANDLE;
@@ -211,9 +218,8 @@ namespace r4d::vulkan
             {
                 matches = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
             }
-            else if (std::all_of(wanted.begin(), wanted.end(), [](unsigned char c) {
-                         return std::isdigit(c) != 0;
-                     }))
+            else if (std::all_of(wanted.begin(), wanted.end(),
+                                 [](unsigned char c) { return std::isdigit(c) != 0; }))
             {
                 std::uint32_t index = 0;
                 std::from_chars(wanted.data(), wanted.data() + wanted.size(), index);
@@ -221,7 +227,8 @@ namespace r4d::vulkan
             }
             else
             {
-                matches = toLower(properties.deviceName).find(wanted) != std::string::npos;
+                matches =
+                    toLower(properties.deviceName).find(wanted) != std::string::npos;
             }
 
             if (matches && chosen == VK_NULL_HANDLE)
@@ -274,7 +281,8 @@ namespace r4d::vulkan
     Status createLogicalDevice(DeviceContext& context, VkSurfaceKHR surface)
     {
         std::uint32_t familyCount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(context.physicalDevice, &familyCount, nullptr);
+        vkGetPhysicalDeviceQueueFamilyProperties(context.physicalDevice, &familyCount,
+                                                 nullptr);
         std::vector<VkQueueFamilyProperties> families(familyCount);
         vkGetPhysicalDeviceQueueFamilyProperties(context.physicalDevice, &familyCount,
                                                  families.data());
@@ -323,18 +331,19 @@ namespace r4d::vulkan
         features2.pNext = &features13;
         vkGetPhysicalDeviceFeatures2(context.physicalDevice, &features2);
 
-        if (features13.dynamicRendering != VK_TRUE || features13.synchronization2 != VK_TRUE ||
+        if (features13.dynamicRendering != VK_TRUE ||
+            features13.synchronization2 != VK_TRUE ||
             features13.shaderDemoteToHelperInvocation != VK_TRUE)
         {
-            return makeError(ErrorCode::UnsupportedFeature,
-                             "this device does not report dynamicRendering, "
-                             "synchronization2 and shaderDemoteToHelperInvocation, which the "
-                             "Vulkan backend requires");
+            return makeError(
+                ErrorCode::UnsupportedFeature,
+                "this device does not report dynamicRendering, "
+                "synchronization2 and shaderDemoteToHelperInvocation, which the "
+                "Vulkan backend requires");
         }
 
         VkPhysicalDeviceFeatures enabledFeatures{};
-        enabledFeatures.samplerAnisotropy =
-            features2.features.samplerAnisotropy;
+        enabledFeatures.samplerAnisotropy = features2.features.samplerAnisotropy;
         enabledFeatures.fillModeNonSolid = features2.features.fillModeNonSolid;
 
         VkPhysicalDeviceVulkan13Features enable13{
@@ -347,13 +356,14 @@ namespace r4d::vulkan
         deviceInfo.pNext = &enable13;
         deviceInfo.queueCreateInfoCount = 1;
         deviceInfo.pQueueCreateInfos = &queueInfo;
-        deviceInfo.enabledExtensionCount = static_cast<std::uint32_t>(std::size(kDeviceExtensions));
+        deviceInfo.enabledExtensionCount =
+            static_cast<std::uint32_t>(std::size(kDeviceExtensions));
         deviceInfo.ppEnabledExtensionNames = kDeviceExtensions;
         deviceInfo.pEnabledFeatures = &enabledFeatures;
 
-        R4D_VK_DEVICE(vkCreateDevice(context.physicalDevice, &deviceInfo, nullptr,
-                                     &context.device),
-                      "vkCreateDevice");
+        R4D_VK_DEVICE(
+            vkCreateDevice(context.physicalDevice, &deviceInfo, nullptr, &context.device),
+            "vkCreateDevice");
         vkGetDeviceQueue(context.device, context.queueFamily, 0, &context.queue);
 
         GpuCapabilities& caps = context.capabilities;
@@ -387,7 +397,8 @@ namespace r4d::vulkan
         if (context.messenger != VK_NULL_HANDLE && context.instance != VK_NULL_HANDLE)
         {
             auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-                vkGetInstanceProcAddr(context.instance, "vkDestroyDebugUtilsMessengerEXT"));
+                vkGetInstanceProcAddr(context.instance,
+                                      "vkDestroyDebugUtilsMessengerEXT"));
             if (destroy != nullptr)
             {
                 destroy(context.instance, context.messenger, nullptr);

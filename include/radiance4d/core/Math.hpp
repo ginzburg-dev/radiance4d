@@ -23,6 +23,12 @@ namespace r4d
 
     inline constexpr float kPi = 3.14159265358979323846f;
 
-    constexpr float degreesToRadians(float degrees) { return degrees * (kPi / 180.0f); }
-    constexpr float radiansToDegrees(float radians) { return radians * (180.0f / kPi); }
+    constexpr float degreesToRadians(float degrees)
+    {
+        return degrees * (kPi / 180.0f);
+    }
+    constexpr float radiansToDegrees(float radians)
+    {
+        return radians * (180.0f / kPi);
+    }
 } // namespace r4d

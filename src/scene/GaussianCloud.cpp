@@ -20,8 +20,9 @@ namespace r4d
             const float sine = glm::length(axis);
             if (sine < 1e-6f)
             {
-                return glm::dot(from, to) > 0.0f ? Quat{1.0f, 0.0f, 0.0f, 0.0f}
-                                                 : glm::angleAxis(kPi, Vec3{0.0f, 1.0f, 0.0f});
+                return glm::dot(from, to) > 0.0f
+                           ? Quat{1.0f, 0.0f, 0.0f, 0.0f}
+                           : glm::angleAxis(kPi, Vec3{0.0f, 1.0f, 0.0f});
             }
             return glm::angleAxis(std::atan2(sine, glm::dot(from, to)), axis / sine);
         }
@@ -31,8 +32,8 @@ namespace r4d
         // linear, which matters at a million splats.
         float quantileInPlace(std::vector<float>& values, float quantile)
         {
-            const float position = std::clamp(quantile, 0.0f, 1.0f) *
-                                   static_cast<float>(values.size() - 1);
+            const float position =
+                std::clamp(quantile, 0.0f, 1.0f) * static_cast<float>(values.size() - 1);
             const auto rank = static_cast<std::size_t>(position);
             std::nth_element(values.begin(), values.begin() + rank, values.end());
             return values[rank];
@@ -142,11 +143,9 @@ namespace r4d
                 g.scale = Vec3{0.11f, 0.018f, 0.018f};
 
                 const float dAngle = 18.0f * kPi;
-                g.rotation = rotationTo(Vec3{1.1f * std::cos(angle) -
-                                                 radius * dAngle * std::sin(angle),
-                                             1.8f,
-                                             1.1f * std::sin(angle) +
-                                                 radius * dAngle * std::cos(angle)});
+                g.rotation = rotationTo(
+                    Vec3{1.1f * std::cos(angle) - radius * dAngle * std::sin(angle), 1.8f,
+                         1.1f * std::sin(angle) + radius * dAngle * std::cos(angle)});
                 oriented = true;
             }
             else
@@ -154,21 +153,21 @@ namespace r4d
                 const float radius = 1.45f * std::cbrt(unit(rng));
                 const float theta = unit(rng) * 2.0f * kPi;
                 const float phi = std::acos(signed01(rng));
-                g.position = Vec3{radius * std::sin(phi) * std::cos(theta),
-                                  radius * std::cos(phi),
-                                  radius * std::sin(phi) * std::sin(theta)};
-                setConstantColour(g, Vec3{0.55f + 0.4f * unit(rng),
-                                          0.6f + 0.3f * unit(rng),
-                                          0.7f + 0.3f * unit(rng)});
+                g.position =
+                    Vec3{radius * std::sin(phi) * std::cos(theta), radius * std::cos(phi),
+                         radius * std::sin(phi) * std::sin(theta)};
+                setConstantColour(g,
+                                  Vec3{0.55f + 0.4f * unit(rng), 0.6f + 0.3f * unit(rng),
+                                       0.7f + 0.3f * unit(rng)});
                 g.opacity = 0.04f + 0.10f * unit(rng);
                 g.scale = Vec3{0.05f, 0.05f, 0.05f} * (0.5f + 1.5f * unit(rng));
             }
 
             if (!oriented)
             {
-                const Vec3 axis = glm::normalize(Vec3{signed01(rng), signed01(rng),
-                                                      signed01(rng)} +
-                                                 Vec3{0.0f, 0.001f, 0.0f});
+                const Vec3 axis =
+                    glm::normalize(Vec3{signed01(rng), signed01(rng), signed01(rng)} +
+                                   Vec3{0.0f, 0.001f, 0.0f});
                 g.rotation = glm::angleAxis(unit(rng) * 2.0f * kPi, axis);
             }
 

@@ -47,15 +47,16 @@ namespace r4d
             std::filesystem::create_directories(path.parent_path(), ec);
         }
 
-        const int written = ::stbi_write_png(
-            path.string().c_str(), static_cast<int>(image.width),
-            static_cast<int>(image.height), 4, image.rgba.data(),
-            static_cast<int>(image.rowPitch()));
+        const int written =
+            ::stbi_write_png(path.string().c_str(), static_cast<int>(image.width),
+                             static_cast<int>(image.height), 4, image.rgba.data(),
+                             static_cast<int>(image.rowPitch()));
 
         if (written == 0)
         {
-            return makeError(ErrorCode::IoFailure,
-                             std::format("stbi_write_png failed for '{}'", path.string()));
+            return makeError(
+                ErrorCode::IoFailure,
+                std::format("stbi_write_png failed for '{}'", path.string()));
         }
         return Status::Ok();
     }
@@ -90,15 +91,16 @@ namespace r4d
     {
         if (data == nullptr || size == 0)
         {
-            return makeError(ErrorCode::InvalidArgument, "decodeImage called with no data");
+            return makeError(ErrorCode::InvalidArgument,
+                             "decodeImage called with no data");
         }
 
         int width = 0;
         int height = 0;
         int channelsInFile = 0;
-        stbi_uc* pixels = ::stbi_load_from_memory(
-            reinterpret_cast<const stbi_uc*>(data), static_cast<int>(size), &width, &height,
-            &channelsInFile, 4);
+        stbi_uc* pixels = ::stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data),
+                                                  static_cast<int>(size), &width, &height,
+                                                  &channelsInFile, 4);
         if (pixels == nullptr)
         {
             const char* reason = ::stbi_failure_reason();
@@ -143,13 +145,18 @@ namespace r4d
 
                     for (std::size_t c = 0; c < 4; ++c)
                     {
-                        const auto at = [&](std::uint32_t px, std::uint32_t py) {
+                        const auto at = [&](std::uint32_t px, std::uint32_t py)
+                        {
                             return static_cast<int>(
-                                source.rgba[(static_cast<std::size_t>(py) * source.width + px) * 4 + c]);
+                                source.rgba[(static_cast<std::size_t>(py) * source.width +
+                                             px) *
+                                                4 +
+                                            c]);
                         };
-                        const int sum = at(sx, sy) + at(sx1, sy) + at(sx, sy1) + at(sx1, sy1);
-                        next.rgba[(static_cast<std::size_t>(y) * next.width + x) * 4 + c] =
-                            static_cast<std::uint8_t>((sum + 2) / 4);
+                        const int sum =
+                            at(sx, sy) + at(sx1, sy) + at(sx, sy1) + at(sx1, sy1);
+                        next.rgba[(static_cast<std::size_t>(y) * next.width + x) * 4 +
+                                  c] = static_cast<std::uint8_t>((sum + 2) / 4);
                     }
                 }
             }

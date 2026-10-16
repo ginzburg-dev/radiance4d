@@ -15,14 +15,14 @@ namespace r4d
     Vec3 Camera::forward() const
     {
         // Left-handed, +z forward at yaw 0.
-        return Vec3{std::cos(m_pitch) * std::sin(m_yaw),
-                    std::sin(m_pitch),
+        return Vec3{std::cos(m_pitch) * std::sin(m_yaw), std::sin(m_pitch),
                     std::cos(m_pitch) * std::cos(m_yaw)};
     }
 
     Vec3 Camera::position() const
     {
-        return m_mode == CameraMode::Orbit ? m_target - forward() * m_distance : m_position;
+        return m_mode == CameraMode::Orbit ? m_target - forward() * m_distance
+                                           : m_position;
     }
 
     Mat4 Camera::view() const
@@ -53,9 +53,15 @@ namespace r4d
         m_position = m_target - forward() * m_distance;
     }
 
-    float Camera::yawDegrees() const { return radiansToDegrees(m_yaw); }
+    float Camera::yawDegrees() const
+    {
+        return radiansToDegrees(m_yaw);
+    }
 
-    float Camera::pitchDegrees() const { return radiansToDegrees(m_pitch); }
+    float Camera::pitchDegrees() const
+    {
+        return radiansToDegrees(m_pitch);
+    }
 
     void Camera::update(const InputState& input, double deltaSeconds)
     {
@@ -70,14 +76,16 @@ namespace r4d
                 // The drag grabs the subject, as the pitch and the pan below do:
                 // it turns with the cursor, not against it.
                 m_yaw += mouseDelta.x * m_orbitSpeed;
-                m_pitch = std::clamp(m_pitch - mouseDelta.y * m_orbitSpeed,
-                                     -kPitchLimit, kPitchLimit);
+                m_pitch = std::clamp(m_pitch - mouseDelta.y * m_orbitSpeed, -kPitchLimit,
+                                     kPitchLimit);
             }
 
-            if (input.mouseDown(MouseButton::Right) || input.mouseDown(MouseButton::Middle))
+            if (input.mouseDown(MouseButton::Right) ||
+                input.mouseDown(MouseButton::Middle))
             {
                 // Pan scales with distance so the grab point tracks the cursor.
-                const Vec3 right = glm::normalize(glm::cross(Vec3{0.0f, 1.0f, 0.0f}, forward()));
+                const Vec3 right =
+                    glm::normalize(glm::cross(Vec3{0.0f, 1.0f, 0.0f}, forward()));
                 const Vec3 up = glm::cross(forward(), right);
                 const float scale = m_panSpeed * m_distance;
                 m_target += right * (-mouseDelta.x * scale) + up * (mouseDelta.y * scale);
@@ -86,7 +94,8 @@ namespace r4d
             if (wheel != 0.0f)
             {
                 // Multiplicative, so each notch is the same proportional step.
-                m_distance = std::max(m_distance * std::pow(1.0f - m_zoomSpeed, wheel), 0.01f);
+                m_distance =
+                    std::max(m_distance * std::pow(1.0f - m_zoomSpeed, wheel), 0.01f);
             }
 
             m_position = m_target - forward() * m_distance;
@@ -96,20 +105,26 @@ namespace r4d
             if (input.mouseDown(MouseButton::Left) || input.mouseDown(MouseButton::Right))
             {
                 m_yaw += mouseDelta.x * m_orbitSpeed;
-                m_pitch = std::clamp(m_pitch - mouseDelta.y * m_orbitSpeed,
-                                     -kPitchLimit, kPitchLimit);
+                m_pitch = std::clamp(m_pitch - mouseDelta.y * m_orbitSpeed, -kPitchLimit,
+                                     kPitchLimit);
             }
 
             const Vec3 ahead = forward();
             const Vec3 right = glm::normalize(glm::cross(Vec3{0.0f, 1.0f, 0.0f}, ahead));
 
             Vec3 motion{0.0f, 0.0f, 0.0f};
-            if (input.down(Key::W)) motion += ahead;
-            if (input.down(Key::S)) motion -= ahead;
-            if (input.down(Key::D)) motion += right;
-            if (input.down(Key::A)) motion -= right;
-            if (input.down(Key::E) || input.down(Key::Space)) motion += Vec3{0.0f, 1.0f, 0.0f};
-            if (input.down(Key::Q) || input.down(Key::Control)) motion -= Vec3{0.0f, 1.0f, 0.0f};
+            if (input.down(Key::W))
+                motion += ahead;
+            if (input.down(Key::S))
+                motion -= ahead;
+            if (input.down(Key::D))
+                motion += right;
+            if (input.down(Key::A))
+                motion -= right;
+            if (input.down(Key::E) || input.down(Key::Space))
+                motion += Vec3{0.0f, 1.0f, 0.0f};
+            if (input.down(Key::Q) || input.down(Key::Control))
+                motion -= Vec3{0.0f, 1.0f, 0.0f};
 
             if (glm::dot(motion, motion) > 0.0f)
             {
@@ -119,7 +134,8 @@ namespace r4d
 
             if (wheel != 0.0f)
             {
-                m_moveSpeed = std::clamp(m_moveSpeed * std::pow(1.1f, wheel), 0.05f, 500.0f);
+                m_moveSpeed =
+                    std::clamp(m_moveSpeed * std::pow(1.1f, wheel), 0.05f, 500.0f);
             }
 
             m_target = m_position + ahead * m_distance;

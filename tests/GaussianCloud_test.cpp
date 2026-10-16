@@ -134,11 +134,12 @@ namespace
         for (int i = 0; i < 1000; ++i)
         {
             r4d::Gaussian g;
-            g.position = centre + r4d::Vec3{static_cast<float>(i % 10),
-                                            static_cast<float>((i / 10) % 10),
-                                            static_cast<float>((i / 100) % 10)} *
-                                          (2.0f / 9.0f) -
-                         r4d::Vec3{1.0f};
+            g.position =
+                centre +
+                r4d::Vec3{static_cast<float>(i % 10), static_cast<float>((i / 10) % 10),
+                          static_cast<float>((i / 100) % 10)} *
+                    (2.0f / 9.0f) -
+                r4d::Vec3{1.0f};
             g.scale = r4d::Vec3{0.01f};
             cloud.gaussians.push_back(g);
         }
@@ -266,6 +267,7 @@ TEST(Sphere, MergeCoversBothAndKeepsTheOuterOne)
     EXPECT_NEAR(apart.centre.x, 5.5f, 1e-5f);
 
     // A box's sphere is its half-diagonal, not its half-extent.
-    const r4d::Sphere box = r4d::boundingSphere(r4d::Bounds{r4d::Vec3{-1.0f}, r4d::Vec3{1.0f}});
+    const r4d::Sphere box =
+        r4d::boundingSphere(r4d::Bounds{r4d::Vec3{-1.0f}, r4d::Vec3{1.0f}});
     EXPECT_NEAR(box.radius, std::sqrt(3.0f), 1e-5f);
 }

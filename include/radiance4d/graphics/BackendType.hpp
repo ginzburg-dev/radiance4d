@@ -17,7 +17,7 @@ namespace r4d
     {
         switch (backend)
         {
-            case BackendType::D3D12:  return "D3D12";
+            case BackendType::D3D12: return "D3D12";
             case BackendType::Vulkan: return "Vulkan";
         }
         return "Unknown";

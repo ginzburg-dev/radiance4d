@@ -47,9 +47,9 @@ namespace r4d::d3d12
         bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-        R4D_HR(device->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE,
-                                               &bufferDesc, D3D12_RESOURCE_STATE_COPY_DEST,
-                                               nullptr, IID_PPV_ARGS(&m_readback)),
+        R4D_HR(device->CreateCommittedResource(
+                   &readbackHeap, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+                   D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_readback)),
                "CreateCommittedResource (timestamp readback)");
         m_readback->SetName(L"Radiance4D Timestamp Readback");
 
@@ -92,11 +92,10 @@ namespace r4d::d3d12
         }
         commandList->EndQuery(m_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
                               slot * kQueriesPerSlot + 1);
-        commandList->ResolveQueryData(m_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
-                                      slot * kQueriesPerSlot, kFrameQueries,
-                                      m_readback.Get(),
-                                      static_cast<UINT64>(slot) * kQueriesPerSlot *
-                                          sizeof(UINT64));
+        commandList->ResolveQueryData(
+            m_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, slot * kQueriesPerSlot,
+            kFrameQueries, m_readback.Get(),
+            static_cast<UINT64>(slot) * kQueriesPerSlot * sizeof(UINT64));
         m_slotResolved[slot] = true;
 
         // Resolving a query that was never written would read back whatever the
@@ -162,8 +161,8 @@ namespace r4d::d3d12
             return false;
         }
 
-        outMilliseconds =
-            (static_cast<double>(second - first) * 1000.0) / static_cast<double>(m_frequency);
+        outMilliseconds = (static_cast<double>(second - first) * 1000.0) /
+                          static_cast<double>(m_frequency);
         return true;
     }
 

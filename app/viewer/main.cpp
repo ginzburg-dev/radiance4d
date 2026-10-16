@@ -44,7 +44,7 @@ namespace
         std::string scenePath;
         std::string outputPath;
         double fixedTimeStep = 0.0;
-        float exposure = -1.0f;   // negative: keep the renderer default
+        float exposure = -1.0f; // negative: keep the renderer default
         std::uint64_t benchmarkFrames = 0;
         std::uint32_t splatCount = 0;
         std::uint32_t splatSeed = 1337;
@@ -67,7 +67,8 @@ namespace
             "  --no-pass-timings           drop the per-pass GPU timestamps, leaving\n"
             "                              only the whole-frame pair\n"
             "  --debug / --no-debug         D3D12 debug layer (default: on)\n"
-            "  --gpu-validation             GPU-based validation (slow; never benchmark)\n"
+            "  --gpu-validation             GPU-based validation (slow; never "
+            "benchmark)\n"
             "  --log-level <0..5>           0=trace 2=info 4=error\n"
             "  --frames <n>                 exit after n frames (for automated runs)\n"
             "  --resize-cycles <n>          cycle through window sizes n times\n"
@@ -106,8 +107,10 @@ namespace
         for (int i = 1; i < argc; ++i)
         {
             const std::string_view arg{argv[i]};
-            const auto next = [&](std::string_view& out) {
-                if (i + 1 >= argc) return false;
+            const auto next = [&](std::string_view& out)
+            {
+                if (i + 1 >= argc)
+                    return false;
                 out = argv[++i];
                 return true;
             };
@@ -119,59 +122,90 @@ namespace
             }
             else if (arg == "--adapter")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 options.adapterSelector = std::string{value};
             }
             else if (arg == "--width")
             {
                 std::uint64_t n = 0;
-                if (!next(value) || !parseUint(value, n) || n == 0) return false;
+                if (!next(value) || !parseUint(value, n) || n == 0)
+                    return false;
                 options.width = static_cast<std::uint32_t>(n);
             }
             else if (arg == "--height")
             {
                 std::uint64_t n = 0;
-                if (!next(value) || !parseUint(value, n) || n == 0) return false;
+                if (!next(value) || !parseUint(value, n) || n == 0)
+                    return false;
                 options.height = static_cast<std::uint32_t>(n);
             }
-            else if (arg == "--vsync")      { options.vsync = true; }
-            else if (arg == "--no-vsync")   { options.vsync = false; }
-            else if (arg == "--no-pass-timings") { options.passTimings = false; }
-            else if (arg == "--debug")      { options.debugLayer = true; }
-            else if (arg == "--no-debug")   { options.debugLayer = false; }
-            else if (arg == "--gpu-validation") { options.gpuValidation = true; }
-            else if (arg == "--headless")   { options.headless = true; }
+            else if (arg == "--vsync")
+            {
+                options.vsync = true;
+            }
+            else if (arg == "--no-vsync")
+            {
+                options.vsync = false;
+            }
+            else if (arg == "--no-pass-timings")
+            {
+                options.passTimings = false;
+            }
+            else if (arg == "--debug")
+            {
+                options.debugLayer = true;
+            }
+            else if (arg == "--no-debug")
+            {
+                options.debugLayer = false;
+            }
+            else if (arg == "--gpu-validation")
+            {
+                options.gpuValidation = true;
+            }
+            else if (arg == "--headless")
+            {
+                options.headless = true;
+            }
             else if (arg == "--log-level")
             {
                 std::uint64_t n = 0;
-                if (!next(value) || !parseUint(value, n) || n > 5) return false;
+                if (!next(value) || !parseUint(value, n) || n > 5)
+                    return false;
                 options.logLevel = static_cast<int>(n);
             }
             else if (arg == "--frames")
             {
-                if (!next(value) || !parseUint(value, options.frameLimit)) return false;
+                if (!next(value) || !parseUint(value, options.frameLimit))
+                    return false;
             }
             else if (arg == "--resize-cycles")
             {
                 std::uint64_t n = 0;
-                if (!next(value) || !parseUint(value, n)) return false;
+                if (!next(value) || !parseUint(value, n))
+                    return false;
                 options.resizeCycles = static_cast<std::uint32_t>(n);
             }
             else if (arg == "--scene")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 options.scenePath = std::string{value};
             }
             else if (arg == "--out")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 options.outputPath = std::string{value};
             }
             else if (arg == "--grid")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 const std::size_t split = value.find('x');
-                if (split == std::string_view::npos) return false;
+                if (split == std::string_view::npos)
+                    return false;
                 std::uint64_t columns = 0;
                 std::uint64_t rows = 0;
                 if (!parseUint(value.substr(0, split), columns) ||
@@ -179,35 +213,42 @@ namespace
                 {
                     return false;
                 }
-                if (columns < 2 || rows < 2) return false;
+                if (columns < 2 || rows < 2)
+                    return false;
                 options.gridColumns = static_cast<int>(columns);
                 options.gridRows = static_cast<int>(rows);
             }
             else if (arg == "--splats")
             {
                 std::uint64_t parsed = 0;
-                if (!next(value) || !parseUint(value, parsed)) return false;
+                if (!next(value) || !parseUint(value, parsed))
+                    return false;
                 options.splatCount = static_cast<std::uint32_t>(parsed);
             }
             else if (arg == "--splat-ply")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 options.splatPlyPath = std::string{value};
             }
             else if (arg == "--splat-seed")
             {
                 std::uint64_t parsed = 0;
-                if (!next(value) || !parseUint(value, parsed)) return false;
+                if (!next(value) || !parseUint(value, parsed))
+                    return false;
                 options.splatSeed = static_cast<std::uint32_t>(parsed);
             }
             else if (arg == "--benchmark")
             {
-                if (!next(value) || !parseUint(value, options.benchmarkFrames)) return false;
-                if (options.benchmarkFrames == 0) return false;
+                if (!next(value) || !parseUint(value, options.benchmarkFrames))
+                    return false;
+                if (options.benchmarkFrames == 0)
+                    return false;
             }
             else if (arg == "--orbit-yaw" || arg == "--orbit-pitch")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 float degrees = 0.0f;
                 try
                 {
@@ -228,7 +269,8 @@ namespace
             }
             else if (arg == "--exposure")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 try
                 {
                     options.exposure = std::stof(std::string{value});
@@ -237,11 +279,13 @@ namespace
                 {
                     return false;
                 }
-                if (options.exposure <= 0.0f) return false;
+                if (options.exposure <= 0.0f)
+                    return false;
             }
             else if (arg == "--fixed-step")
             {
-                if (!next(value)) return false;
+                if (!next(value))
+                    return false;
                 try
                 {
                     options.fixedTimeStep = std::stod(std::string{value});
@@ -250,12 +294,15 @@ namespace
                 {
                     return false;
                 }
-                if (options.fixedTimeStep < 0.0) return false;
+                if (options.fixedTimeStep < 0.0)
+                    return false;
             }
             else if (arg == "--backend")
             {
-                if (!next(value)) return false;
-                if (!r4d::parseBackendType(value, options.backend)) return false;
+                if (!next(value))
+                    return false;
+                if (!r4d::parseBackendType(value, options.backend))
+                    return false;
             }
             else
             {
@@ -267,7 +314,10 @@ namespace
         return true;
     }
 
-    bool optionsExposureSet(const Options& options) { return options.exposure > 0.0f; }
+    bool optionsExposureSet(const Options& options)
+    {
+        return options.exposure > 0.0f;
+    }
 
     struct Samples
     {
@@ -296,7 +346,8 @@ namespace
             return 0.0;
         }
         double sum = 0.0;
-        for (double v : values) sum += v;
+        for (double v : values)
+            sum += v;
         return sum / static_cast<double>(values.size());
     }
 
@@ -311,11 +362,11 @@ namespace
                  r4d::ToString(gpu.backend()), options.vsync ? "on" : "off",
                  options.passTimings ? "on" : "off");
         R4D_INFO("  adapter   {}", gpu.adapterInfo().name);
-        R4D_INFO("  scene     {} draws, {} triangles",
-                 stats.drawCalls, stats.triangles);
+        R4D_INFO("  scene     {} draws, {} triangles", stats.drawCalls, stats.triangles);
         R4D_INFO("  CPU  min {:.3f}  mean {:.3f}  p95 {:.3f} ms",
-                 samples.cpu.empty() ? 0.0 : *std::min_element(samples.cpu.begin(),
-                                                               samples.cpu.end()),
+                 samples.cpu.empty()
+                     ? 0.0
+                     : *std::min_element(samples.cpu.begin(), samples.cpu.end()),
                  mean(samples.cpu), percentile(samples.cpu, 0.95));
         if (samples.gpu.empty())
         {
@@ -406,7 +457,8 @@ namespace
             {
                 if (options.splatCount != 0)
                 {
-                    R4D_WARN("--splat-ply and --splats are both set; loading the dataset");
+                    R4D_WARN(
+                        "--splat-ply and --splats are both set; loading the dataset");
                 }
                 auto loaded = r4d::loadGaussianPly(options.splatPlyPath);
                 if (!loaded)
@@ -429,8 +481,8 @@ namespace
             }
             R4D_INFO("Splats: framing on centre ({:.3f}, {:.3f}, {:.3f}) radius {:.3f}, "
                      "against bounds radius {:.3f}",
-                     cloud.framing.centre.x, cloud.framing.centre.y, cloud.framing.centre.z,
-                     cloud.framing.radius, cloud.bounds.radius());
+                     cloud.framing.centre.x, cloud.framing.centre.y,
+                     cloud.framing.centre.z, cloud.framing.radius, cloud.bounds.radius());
             framing = framed ? merge(framing, cloud.framing) : cloud.framing;
             framed = true;
         }
@@ -505,8 +557,9 @@ namespace
         const std::uint64_t validationErrors = gpu.validationErrorCount();
         if (validationErrors != 0)
         {
-            R4D_CRIT("VALIDATION FAILED: {} debug-layer error(s) or corruption(s) reported",
-                     validationErrors);
+            R4D_CRIT(
+                "VALIDATION FAILED: {} debug-layer error(s) or corruption(s) reported",
+                validationErrors);
             return 1;
         }
         if (options.debugLayer)
@@ -515,7 +568,8 @@ namespace
         }
         else
         {
-            R4D_WARN("Debug layer was disabled; this run proves nothing about validation");
+            R4D_WARN(
+                "Debug layer was disabled; this run proves nothing about validation");
         }
         return 0;
     }
@@ -537,9 +591,9 @@ namespace
                      "wall clock, so the output is not reproducible");
         }
 
-        auto renderer = createRenderer(options.backend,
-                                       makeRendererDesc(options, nullptr,
-                                                        UVec2{options.width, options.height}));
+        auto renderer = createRenderer(
+            options.backend,
+            makeRendererDesc(options, nullptr, UVec2{options.width, options.height}));
         if (!renderer)
         {
             R4D_CRIT("Renderer creation failed: {}", renderer.error().ToString());
@@ -565,8 +619,8 @@ namespace
         std::uint64_t frame = 0;
         for (; frame < options.frameLimit; ++frame)
         {
-            gpu.setCamera(CameraParams{camera.view(), camera.projection(),
-                                       camera.position()});
+            gpu.setCamera(
+                CameraParams{camera.view(), camera.projection(), camera.position()});
             if (auto status = gpu.renderFrame(); !status)
             {
                 R4D_CRIT("renderFrame failed: {}", status.error().ToString());
@@ -625,9 +679,8 @@ namespace
         }
 
         auto renderer = createRenderer(
-            options.backend,
-            makeRendererDesc(options, window.value()->nativeHandle(),
-                             window.value()->size()));
+            options.backend, makeRendererDesc(options, window.value()->nativeHandle(),
+                                              window.value()->size()));
         if (!renderer)
         {
             R4D_CRIT("Renderer creation failed: {}", renderer.error().ToString());
@@ -642,17 +695,18 @@ namespace
         }
 
         window.value()->setMessageHook(
-            [](void* hwnd, unsigned message, unsigned long long wparam, long long lparam) {
-                return debugUiHandleMessage(hwnd, message, wparam, lparam);
-            });
+            [](void* hwnd, unsigned message, unsigned long long wparam, long long lparam)
+            { return debugUiHandleMessage(hwnd, message, wparam, lparam); });
 
-        gpu.setUiCallback([&]() {
-            RenderSettings settings = gpu.renderSettings();
-            drawStatsWindow(gpu.stats(), gpu.adapterInfo(), gpu.capabilities(),
-                            std::string{ToString(gpu.backend())}, gpu.vsync(),
-                            std::string{ToString(camera.mode())}, settings);
-            gpu.setRenderSettings(settings);
-        });
+        gpu.setUiCallback(
+            [&]()
+            {
+                RenderSettings settings = gpu.renderSettings();
+                drawStatsWindow(gpu.stats(), gpu.adapterInfo(), gpu.capabilities(),
+                                std::string{ToString(gpu.backend())}, gpu.vsync(),
+                                std::string{ToString(camera.mode())}, settings);
+                gpu.setRenderSettings(settings);
+            });
 
         R4D_INFO("Controls: Esc quit, F1 vsync, F2 camera mode, "
                  "LMB orbit, RMB pan, wheel zoom, WASDQE in free-fly");
@@ -713,8 +767,8 @@ namespace
             {
                 camera.update(input, gpu.stats().cpuFrameMs / 1000.0);
             }
-            gpu.setCamera(CameraParams{camera.view(), camera.projection(),
-                                       camera.position()});
+            gpu.setCamera(
+                CameraParams{camera.view(), camera.projection(), camera.position()});
 
             if (auto status = gpu.renderFrame(); !status)
             {

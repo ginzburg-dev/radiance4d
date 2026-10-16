@@ -56,7 +56,8 @@ namespace r4d
     private:
         Window() = default;
 
-        long long handleMessage(unsigned msg, unsigned long long wparam, long long lparam);
+        long long handleMessage(unsigned msg, unsigned long long wparam,
+                                long long lparam);
         friend struct WindowProcAccess;
 
         void* m_hwnd = nullptr;

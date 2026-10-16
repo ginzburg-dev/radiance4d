@@ -103,7 +103,8 @@ namespace
             }
         }
         return static_cast<double>(covered) /
-               static_cast<double>(static_cast<std::uint64_t>(image.width) * image.height);
+               static_cast<double>(static_cast<std::uint64_t>(image.width) *
+                                   image.height);
     }
 
     class SplatRender : public ::testing::Test
@@ -196,8 +197,8 @@ TEST_F(SplatRender, MatchesTheStoredWarpReference)
     const auto difference = r4d::testing::compareImages(capture.value(), expected.value(),
                                                         kPerPixelTolerance);
 
-    if (!difference.comparable || difference.maxChannelDelta > 4 || difference.rmse > 1.0 ||
-        difference.differingFraction() > 0.001)
+    if (!difference.comparable || difference.maxChannelDelta > 4 ||
+        difference.rmse > 1.0 || difference.differingFraction() > 0.001)
     {
         r4d::testing::writeFailureArtefacts(reference, capture.value(), expected.value());
         FAIL() << "splat render differs from the stored WARP reference: "

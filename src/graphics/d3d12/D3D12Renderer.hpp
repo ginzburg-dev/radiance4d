@@ -70,7 +70,7 @@ namespace r4d::d3d12
         struct FrameContext
         {
             ComPtr<ID3D12CommandAllocator> commandAllocator;
-            ComPtr<ID3D12Resource> constantBuffer;   // upload heap, persistently mapped
+            ComPtr<ID3D12Resource> constantBuffer; // upload heap, persistently mapped
             std::byte* constantBufferCpu = nullptr;
             // The allocator may not be reset until the fence reaches this.
             UINT64 fenceValue = 0;
@@ -84,9 +84,10 @@ namespace r4d::d3d12
         Status uploadModel(const Model& model) override;
         Status uploadGaussians(const GaussianCloud& cloud) override;
         Status uploadTextures(const Model& model);
-        Result<ComPtr<ID3D12Resource>> createTexture(const ImageRgba8& image, bool srgb,
-                                                     ID3D12GraphicsCommandList7* commandList,
-                                                     std::vector<ComPtr<ID3D12Resource>>& staging);
+        Result<ComPtr<ID3D12Resource>>
+        createTexture(const ImageRgba8& image, bool srgb,
+                      ID3D12GraphicsCommandList7* commandList,
+                      std::vector<ComPtr<ID3D12Resource>>& staging);
         Status createRtvHeap();
         Status acquireBackBuffers();
         void releaseBackBuffers();
@@ -120,8 +121,9 @@ namespace r4d::d3d12
 
         Status waitForFenceValue(UINT64 value);
 
-        Result<std::vector<std::byte>> loadShaderBlob(
-            const std::filesystem::path& shaderDirectory, std::string_view name) const;
+        Result<std::vector<std::byte>>
+        loadShaderBlob(const std::filesystem::path& shaderDirectory,
+                       std::string_view name) const;
 
         ComPtr<IDXGIFactory6> m_factory;
         // Device10 for CreateCommandList1 and CreateCommittedResource3.

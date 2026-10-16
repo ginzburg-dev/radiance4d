@@ -41,7 +41,7 @@ struct SortConstants
     uint tileCount;
     uint shift;       // bit offset of this pass's digit
     uint sourceIsB;   // which half of the ping-pong this pass reads
-    uint padding0;
+    uint pairCapacity;   // how many (tile, splat) pairs the buffers hold
     uint padding1;
     uint padding2;
 };

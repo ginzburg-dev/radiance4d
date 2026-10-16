@@ -3,10 +3,9 @@
 [![Windows build and test](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml/badge.svg?branch=main)](https://github.com/ginzburg-dev/radiance4d/actions/workflows/windows_build_and_test.yaml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**A real-time viewer for scanned places and 3D models together.**
+**A rendering engine for Gaussian splats and meshes.** Direct3D 12 and Vulkan, HLSL shaders.
 
-Load a photogrammetry scan and a 3D model. It draws both in the same frame, correctly in front of
-and behind each other. Direct3D 12 and Vulkan. A million splats at 1080p in under 10 ms.
+1,000,000 splats at 1080p — 9.7 ms.
 
 ![INRIA train, 1.03M splats, with the per-pass overlay](docs/images/overlay.png)
 
@@ -14,42 +13,31 @@ and behind each other. Direct3D 12 and Vulkan. A million splats at 1080p in unde
 
 ## Why
 
-Scans and 3D models are different things. Splat viewers cannot draw models. Game engines treat
-scans as an import. This does both at once.
-
-What that is good for:
+A photogrammetry scan is a cloud of Gaussians. Everything else is triangles. Splat viewers cannot
+draw models, engines treat scans as an import. This draws both.
 
 - **Virtual production and previs** — put CG into a scanned location and walk it live
 - **VFX layout** — a scanned environment behind a CG element instead of a flat plate
 - **Digital twins** — a scanned site with CAD or markup on top
 - **A base to build on** — the whole splatting pipeline, readable, in one repo
 
-The reference splatting code is CUDA, so it needs an NVIDIA card. This one is plain HLSL. It runs
-on any Direct3D 12 or Vulkan GPU, and the tests run it with no GPU at all.
+The reference splatting code is CUDA, so it needs an NVIDIA card. This one is plain HLSL and runs
+on any Direct3D 12 or Vulkan GPU.
+
+![Damaged Helmet](docs/images/damaged-helmet.png)
 
 ---
 
 ## Features
 
-- Modern C++20, CMake, no engine or rendering framework underneath
-- Native Direct3D 12 and Vulkan 1.3 backends behind one narrow interface
-- One HLSL source compiled to both DXIL and SPIR-V by a vendored DXC
-- D3D12 Enhanced Barriers, the retail Agility SDK, DRED and validation counters
-- Vulkan dynamic rendering and synchronization2
-- 3D Gaussian Splatting end to end: covariance projection, compute culling, a GPU radix depth
-  sort, tile binning and a tile rasteriser with per-pixel early termination
-- 3DGS `.ply` datasets with degree-3 spherical harmonics, verified on published scenes
-- Hybrid rendering: splats and meshes share one depth buffer
-- Physically based shading with image-based lighting, shadow mapping and exposure control
-- glTF 2.0 loading, including emissive, normal and metallic-roughness maps
-- Per-pass GPU timestamps, in the overlay and in a reproducible benchmark mode
-- Headless rendering, frame capture and image-regression tests on WARP
-- Cross-API parity tests holding the two backends to the same image
-- Python tooling that turns a COLMAP sparse model into a renderable scene
-
-![Damaged Helmet](docs/images/damaged-helmet.png)
-
-![Material grid](docs/images/material-grid.png)
+- C++20 and CMake, no engine underneath
+- Direct3D 12 and Vulkan 1.3 backends, one HLSL source compiled for both
+- Gaussian splatting: compute culling, GPU radix sort, tiled rasteriser
+- 3DGS `.ply` datasets with degree-3 spherical harmonics
+- glTF 2.0, PBR shading, image-based lighting, shadows
+- Per-pass GPU timings in the overlay and in a benchmark mode
+- Headless rendering, image-regression and cross-API tests
+- COLMAP sparse models exported to renderable splats
 
 ---
 
@@ -69,12 +57,11 @@ frames after a warm-up.
 | Composite | 0.04 ms | 0.04 ms |
 | **Frame** | **9.70 ms** | **10.38 ms** |
 
-The same scene cost 96 ms when the depth sort still ran on the CPU. Moving the sort to a compute
-radix sort, projecting each splat once instead of once per quad corner, and replacing the quad
-rasteriser with a tiled one that stops when a pixel saturates took it to under ten.
+The same scene cost 96 ms with the sort on the CPU. The GPU radix sort, the compute cull pass and
+the tiled rasteriser took it to under ten.
 
-The two backends agree on the image to a maximum channel difference of 1 out of 255, which a test
-enforces on every build.
+Both backends produce the same image to within 1 of 255 per channel. A test checks it on every
+build.
 
 [docs/RENDERING.md](docs/RENDERING.md) has the pipeline in detail and what every change measured.
 
@@ -95,21 +82,22 @@ See [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Running
 
-```
-build/windows-d3d12/bin/Debug/radiance4d_viewer.exe
-```
-
-`--backend <d3d12|vulkan>`, `--scene <file.gltf>`, `--splats <n>`, `--splat-ply <file.ply>`,
-`--adapter <index|warp|name>`, `--no-vsync`, `--gpu-validation`,
-`--frames <n>`, `--resize-cycles <n>`, `--log-level <0..5>`. `--help` lists all flags.
-Without `--scene` a built-in material grid is rendered. Esc quits, F1 toggles vsync, F2 switches
-camera mode; left mouse orbits, right pans, wheel zooms, WASDQE moves in free-fly. Exit code is non-zero if the
-debug layer reported an error.
-
-Headless, no GPU required:
+Load a scan or a model:
 
 ```
-radiance4d_viewer.exe --headless --frames 30 --fixed-step 0.0166667 --out frame.png
+radiance4d_viewer.exe --splat-ply point_cloud.ply
+radiance4d_viewer.exe --scene model.gltf --splats 2000
+radiance4d_viewer.exe --backend vulkan
+```
+
+Mouse orbits, pans and zooms. WASDQE in free-fly. F1 vsync, F2 camera mode, Esc quits.
+`--help` lists every flag.
+
+Render without a window, and without a GPU:
+
+```
+radiance4d_viewer.exe --headless --frames 30 --out frame.png
+radiance4d_viewer.exe --splat-ply point_cloud.ply --benchmark 200
 ```
 
 ## Documentation

@@ -1521,6 +1521,7 @@ namespace r4d::vulkan
             destroyBuffer(sort.pairSplatA);
             destroyBuffer(sort.pairSplatB);
             destroyBuffer(sort.tileRanges);
+            destroyBuffer(sort.pairTotalReadback);
             destroyBuffer(sort.projections);
         }
     }
@@ -1643,8 +1644,20 @@ namespace r4d::vulkan
                                      sort.tileCounts));
             R4D_TRY(createSortBuffer(m_sortPaddedCount, "splat tile offsets",
                                      sort.tileOffsets));
-            R4D_TRY(createSortBuffer(m_sortTileCount + 1, "splat group sums",
-                                     sort.groupSums));
+            // The grand total the binning scan leaves one past the group sums
+            // is copied out of here, so this one is also a transfer source.
+            {
+                auto sums = createBuffer(
+                    static_cast<VkDeviceSize>(m_sortTileCount + 1) *
+                        sizeof(std::uint32_t),
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "splat group sums");
+                if (!sums)
+                {
+                    return sums.error();
+                }
+                sort.groupSums = sums.value();
+            }
             R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair tiles A",
                                      sort.pairTileA));
             R4D_TRY(createSortBuffer(m_pairCapacity, "splat pair tiles B",
@@ -1655,6 +1668,21 @@ namespace r4d::vulkan
                                      sort.pairSplatB));
             R4D_TRY(createSortBuffer(kMaxTiles * 2, "splat tile ranges",
                                      sort.tileRanges));
+
+            // The pair total, copied back so a view that wants more pairs than
+            // the buffers hold says so instead of dropping them in silence.
+            {
+                auto readback = createBuffer(sizeof(std::uint32_t),
+                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                             "splat pair total");
+                if (!readback)
+                {
+                    return readback.error();
+                }
+                sort.pairTotalReadback = readback.value();
+            }
 
             // One projection per real splat; the sort's padding never reaches
             // the draw, so it needs none.
@@ -1711,6 +1739,7 @@ namespace r4d::vulkan
         }
 
         m_gaussianCount = count;
+        m_pairTotalValid = {};
 
         R4D_TRY(createSplatDescriptors());
         R4D_TRY(createSortDescriptors());
@@ -1952,6 +1981,7 @@ namespace r4d::vulkan
         // This slot's buffers were last touched two frames ago and renderFrame
         // has already waited on that frame's fence, so nothing here needs a
         // barrier against the previous frame's reads.
+        const SortBuffers& sort = m_sortBuffers[frameIndex];
         const auto dispatch = [&](SortStage stage, std::uint32_t section,
                                   std::uint32_t groups) {
             // Sections past the depth passes belong to the tile sort, which
@@ -2022,6 +2052,24 @@ namespace r4d::vulkan
                      (tilesX * tilesY + kSortGroupSize - 1) / kSortGroupSize);
             dispatch(SortStage::TileRanges, kSortPasses, m_pairTileCount);
         }
+
+        // The binning scan left the pair total one past the per-group sums, and
+        // nothing after it writes them again, so the copy out waits until the
+        // compute work is done. Putting it between the binning and the tile
+        // sort instead costs 0.5 ms of tile sort: the round trip through the
+        // transfer stage drains a queue that would otherwise have run straight
+        // on. The total is the exact demand even when the frame overflowed,
+        // because the counts it sums are never clamped to the capacity.
+        memoryBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        VkBufferCopy region{};
+        region.srcOffset =
+            static_cast<VkDeviceSize>(m_sortTileCount) * sizeof(std::uint32_t);
+        region.size = sizeof(std::uint32_t);
+        vkCmdCopyBuffer(commandBuffer, sort.groupSums.handle,
+                        sort.pairTotalReadback.handle, 1, &region);
+        m_pairTotalValid[frameIndex] = true;
     }
 
     void VulkanRenderer::rasteriseSplats(VkCommandBuffer commandBuffer,
@@ -2491,6 +2539,23 @@ namespace r4d::vulkan
 
         R4D_VK(vkWaitForFences(m_context.device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX),
                "vkWaitForFences");
+
+        // The same wait means last time's pair total has landed.
+        if (m_gaussianCount != 0 && m_pairTotalValid[frameIndex] &&
+            !m_pairOverflowReported &&
+            m_sortBuffers[frameIndex].pairTotalReadback.mapped)
+        {
+            std::uint32_t total = 0;
+            std::memcpy(&total, m_sortBuffers[frameIndex].pairTotalReadback.mapped,
+                        sizeof(total));
+            if (total > m_pairCapacity)
+            {
+                m_pairOverflowReported = true;
+                R4D_WARN("Splats: tile binning needs {} pairs but holds {}; the "
+                         "overflow is dropped and this view is missing splats",
+                         total, m_pairCapacity);
+            }
+        }
 
         // The fence wait above also means this slot's timestamps have landed.
         if (m_timestampPool != VK_NULL_HANDLE && m_timestampWritten[frameIndex])

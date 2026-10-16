@@ -273,6 +273,10 @@ namespace r4d::vulkan
             Buffer pairSplatA;
             Buffer pairSplatB;
             Buffer tileRanges;
+            // The pair total the binning scan produced, copied back so a view
+            // wanting more than the buffers hold is reported rather than
+            // silently missing its nearest splats.
+            Buffer pairTotalReadback;
         };
         std::array<SortBuffers, kFramesInFlight> m_sortBuffers{};
         VkDescriptorSetLayout m_sortSetLayout = VK_NULL_HANDLE;
@@ -294,6 +298,10 @@ namespace r4d::vulkan
 
         std::uint32_t m_pairCapacity = 0;
         std::uint32_t m_pairTileCount = 0;
+        bool m_pairOverflowReported = false;
+        // A slot's readback holds nothing until that slot has recorded the copy
+        // once; before then it is whatever the mapping happened to contain.
+        std::array<bool, kFramesInFlight> m_pairTotalValid{};
 
         std::uint32_t m_sortTileCount = 0;
         // m_gaussianCount rounded up to a whole number of tiles.

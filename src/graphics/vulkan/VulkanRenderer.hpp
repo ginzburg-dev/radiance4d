@@ -113,6 +113,46 @@ namespace r4d::vulkan
         void updateSplatImageDescriptors();
         void renderSplats(VkCommandBuffer commandBuffer, std::uint32_t frameIndex,
                           std::uint32_t& drawCalls, std::uint32_t& triangles);
+
+        static std::uint32_t passQueryIndex(std::uint32_t frameIndex, GpuPass pass)
+        {
+            return frameIndex * kQueriesPerSlot + kFrameQueries +
+                   2 * static_cast<std::uint32_t>(pass);
+        }
+
+        void beginPassScope(VkCommandBuffer commandBuffer, std::uint32_t frameIndex,
+                            GpuPass pass);
+        void endPassScope(VkCommandBuffer commandBuffer, std::uint32_t frameIndex,
+                          GpuPass pass);
+
+        // Brackets one pass. The destructor closes the scope, so an early return
+        // cannot leave a begin unmatched.
+        class PassScope
+        {
+        public:
+            PassScope(VulkanRenderer& renderer, VkCommandBuffer commandBuffer,
+                      std::uint32_t frameIndex, GpuPass pass)
+                : m_renderer(renderer), m_commandBuffer(commandBuffer),
+                  m_frameIndex(frameIndex), m_pass(pass)
+            {
+                m_renderer.beginPassScope(m_commandBuffer, m_frameIndex, m_pass);
+            }
+
+            ~PassScope()
+            {
+                m_renderer.endPassScope(m_commandBuffer, m_frameIndex, m_pass);
+            }
+
+            PassScope(const PassScope&) = delete;
+            PassScope& operator=(const PassScope&) = delete;
+
+        private:
+            VulkanRenderer& m_renderer;
+            VkCommandBuffer m_commandBuffer;
+            std::uint32_t m_frameIndex;
+            GpuPass m_pass;
+        };
+
         Status createDescriptorSets(const Model& model);
         Status createTimestampPool();
         Status initialiseUi(void* windowHandle);
@@ -270,14 +310,29 @@ namespace r4d::vulkan
 
         VkDescriptorPool m_uiPool = VK_NULL_HANDLE;
         bool m_uiReady = false;
+        // Per slot: the frame pair followed by a pair per GpuPass. The pass pairs
+        // are read only when every scope was bracketed, so a frame with no splats
+        // reports nothing for them rather than garbage.
+        static constexpr std::uint32_t kFrameQueries = 2;
+        static constexpr std::uint32_t kPassQueries =
+            2 * static_cast<std::uint32_t>(kGpuPassCount);
+        static constexpr std::uint32_t kQueriesPerSlot = kFrameQueries + kPassQueries;
+        static constexpr std::uint32_t kAllPassScopes =
+            (1u << static_cast<std::uint32_t>(kGpuPassCount)) - 1u;
+
         VkQueryPool m_timestampPool = VK_NULL_HANDLE;
         std::array<bool, kFramesInFlight> m_timestampWritten{};
+        // One bit per bracketed GpuPass, cleared when the slot is reset.
+        std::array<std::uint32_t, kFramesInFlight> m_passScopeMask{};
+        bool m_passScopesEnabled = true;
 
         RenderSettings m_settings;
         CameraParams m_camera;
         GpuStats m_stats;
         FrameTimer m_frameTimer;
         RollingAverage<FrameTimer::kHistorySize> m_gpuTimeHistory;
+        std::array<RollingAverage<FrameTimer::kHistorySize>, kGpuPassCount>
+            m_gpuPassHistory{};
         std::function<void()> m_uiCallback;
 
         UVec2 m_size{0, 0};
